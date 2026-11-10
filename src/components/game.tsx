@@ -1,5 +1,6 @@
+import { useId, type ReactNode } from 'react';
 import { Image, View, type ViewStyle } from 'react-native';
-import Svg, { Circle, Ellipse, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { CHARACTERS, levelInfo } from '@/lib/game';
 import type { Avatar, Outfit } from '@/lib/types';
@@ -84,6 +85,82 @@ export function CharacterArt({ id, size }: { id: string; size: number }) {
       {id === 'king' && (<><Path d="M16 24l6-10 6 6 6-6 6 10v6H16z" fill="#FDE68A" /><Circle cx={28} cy={38} r={8} fill="#fff" /><Circle cx={25} cy={37} r={1.6} fill="#422006" /><Circle cx={31} cy={37} r={1.6} fill="#422006" /></>)}
       {id === 'star' && (<Path d="m28 12 4.4 9 9.9 1.4-7.2 7 1.7 9.8L28 34.6l-8.8 4.6 1.7-9.8-7.2-7 9.9-1.4z" fill="#FDE68A" />)}
     </Svg>
+  );
+}
+
+/** 366 → "366", 1234 → "1.2k", 12400 → "12k": short enough to fit inside a badge. */
+export const shortCount = (n: number) =>
+  n < 1000 ? String(n) : n < 10_000 ? `${(Math.floor(n / 100) / 10).toFixed(1).replace(/\.0$/, '')}k` : `${Math.floor(n / 1000)}k`;
+
+/** Gold star with the total XP written inside it. */
+export function StarCount({ value, size = 52 }: { value: number; size?: number }) {
+  const id = `star${useId().replace(/:/g, '')}`;
+  const text = shortCount(value);
+  const h = size * 0.96;
+  return (
+    <View style={{ width: size, height: h }} accessibilityLabel={`${value} XP`}>
+      <Svg width={size} height={h} viewBox="0 0 100 96">
+        <Defs>
+          <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#FDE047" />
+            <Stop offset="1" stopColor="#F59E0B" />
+          </LinearGradient>
+        </Defs>
+        <Path d="M50 4 63 33 95 36 71 58 78 90 50 74 22 90 29 58 5 36 37 33Z" fill={`url(#${id})`} stroke="#B45309" strokeWidth={5} strokeLinejoin="round" />
+      </Svg>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: h * 0.32, height: h * 0.34, alignItems: 'center', justifyContent: 'center' }}>
+        <T w={900} size={size * (text.length >= 4 ? 0.21 : text.length === 3 ? 0.25 : 0.31)} color="#422006" style={{ lineHeight: undefined }}>{text}</T>
+      </View>
+    </View>
+  );
+}
+
+/** Flame with the day streak written inside it. Grey when there is no streak. */
+export function FlameCount({ value, size = 42 }: { value: number; size?: number }) {
+  const id = `flame${useId().replace(/:/g, '')}`;
+  const text = shortCount(value);
+  const h = size * 1.22;
+  const off = value <= 0;
+  return (
+    <View style={{ width: size, height: h }} accessibilityLabel={`${value}-day streak`}>
+      <Svg width={size} height={h} viewBox="0 0 90 110">
+        <Defs>
+          <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#FDBA74" />
+            <Stop offset="0.45" stopColor="#F97316" />
+            <Stop offset="1" stopColor="#DC2626" />
+          </LinearGradient>
+        </Defs>
+        <Path d="M45 4C52 24 74 34 80 60c6 26-12 46-35 46S4 86 10 60c4-17 16-22 18-38 9 8 10 18 10 18 4-14 3-26 7-36Z"
+          fill={off ? '#CBD5E1' : `url(#${id})`} stroke={off ? '#94A3B8' : '#9A3412'} strokeWidth={5} strokeLinejoin="round" />
+      </Svg>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: h * 0.42, height: h * 0.36, alignItems: 'center', justifyContent: 'center' }}>
+        <T w={900} size={size * (text.length >= 3 ? 0.28 : text.length === 2 ? 0.34 : 0.42)} color={off ? '#64748B' : '#fff'}
+          style={{ lineHeight: undefined, textShadowColor: off ? 'transparent' : 'rgba(127,29,29,0.6)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } }}>{text}</T>
+      </View>
+    </View>
+  );
+}
+
+/** Profile picture inside a gold ring that fills up toward the next level, with an "LV n" badge. */
+export function LevelRing({ xp, size = 74, children }: { xp?: number; size?: number; children: ReactNode }) {
+  const info = levelInfo(xp);
+  const stroke = 5;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = info.into / Math.max(1, info.need);
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }} accessibilityLabel={`Level ${info.level}, ${Math.round(pct * 100)}% to level ${info.level + 1}`}>
+      <Svg width={size} height={size} style={{ position: 'absolute' }}>
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,0.2)" strokeWidth={stroke} fill="none" />
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke="#FBBF24" strokeWidth={stroke} fill="none" strokeLinecap="round"
+          strokeDasharray={`${c * pct} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      </Svg>
+      {children}
+      <View style={{ position: 'absolute', right: -6, bottom: -6, backgroundColor: '#FBBF24', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 1, borderWidth: 2, borderColor: C.navy }}>
+        <T w={900} size={12} color="#422006">LV {info.level}</T>
+      </View>
+    </View>
   );
 }
 

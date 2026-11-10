@@ -53,22 +53,42 @@ export default function Home() {
     <Screen>
       <View style={{ backgroundColor: C.navy, paddingTop: insets.top + 8, paddingBottom: 18, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden' }}>
         <HeaderDecor />
+        {/* Avatar in a level ring · name and title · XP inside the star · streak inside the flame. */}
         <View style={[column, { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel="Open profile" onPress={() => router.navigate('/profile')}>
-            <AvatarView avatar={profile.avatar} outfit={profile.outfit} size={48} />
+            <LevelRing xp={xp} size={compact ? 64 : 74}>
+              <AvatarView avatar={profile.avatar} outfit={profile.outfit} size={compact ? 50 : 60} ring={C.navy} />
+            </LevelRing>
           </Pressable>
-          <View style={{ flex: 1 }}>
-            <T w={700} size={13.5} color="#BFDBFE">{greeting()}</T>
-            <T w={900} size={24} color="#fff">{profile.firstName}!</T>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <T w={700} size={13.5} color="#BFDBFE" numberOfLines={1}>{greeting()}</T>
+            <T w={900} size={compact ? 20 : 23} color="#fff" numberOfLines={1}>{profile.firstName}!</T>
+            <View style={{ alignSelf: 'flex-start', marginTop: 3, backgroundColor: 'rgba(251,191,36,0.18)', borderRadius: 99, paddingHorizontal: 9, paddingVertical: 1 }}>
+              <T w={900} size={11.5} color="#FDE68A" style={{ letterSpacing: 0.6 }}>{lvl.title.toUpperCase()}</T>
+            </View>
           </View>
-          <HeaderChip><Icon name="star" size={16} color="#FBBF24" /><T w={900} size={14} color="#fff">{profile.stats.xp ?? 0}</T></HeaderChip>
+          <Pressable accessibilityRole="button" accessibilityLabel={`${xp} XP. See level rewards`} hitSlop={4} onPress={() => router.push('/rewards')}>
+            <StarCount value={xp} size={compact ? 46 : 52} />
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={`${streak}-day streak. Open My Journey`} hitSlop={4} onPress={() => router.push('/journey')}>
+            <FlameCount value={streak} size={compact ? 38 : 42} />
+          </Pressable>
         </View>
-        {/* Tapping the level opens the rewards road (a prize for every level). */}
-        <Pressable accessibilityRole="button" accessibilityLabel="See level rewards" onPress={() => router.push('/rewards')}
-          style={[column, { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14 }]}>
-          <LevelBadge xp={profile.stats.xp} />
-          <XpBar xp={profile.stats.xp} />
-          <Icon name="gift" size={22} color="#FBBF24" />
+        {/* Progress to the next level and the prize waiting there. */}
+        <Pressable accessibilityRole="button" accessibilityLabel={reward ? `${lvl.toNext} XP to level ${lvl.level + 1}: ${reward.label}. See level rewards` : 'See level rewards'}
+          onPress={() => router.push('/rewards')}
+          style={[column, { marginTop: 14, paddingHorizontal: 20 }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 16, paddingVertical: 9, paddingHorizontal: 12 }}>
+            <View style={{ flex: 1, gap: 6 }}>
+              <T w={800} size={13} color="#DBEAFE" numberOfLines={1}>
+                {lvl.toNext} XP to Level {lvl.level + 1}{reward ? ' · ' : ''}{reward ? <T w={900} size={13} color="#FDE68A">{reward.label}</T> : null}
+              </T>
+              <View style={{ height: 8, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' }}>
+                <View style={{ width: `${Math.round((lvl.into / Math.max(1, lvl.need)) * 100)}%`, height: '100%', borderRadius: 99, backgroundColor: '#FBBF24' }} />
+              </View>
+            </View>
+            <Icon name="gift" size={22} color="#FBBF24" />
+          </View>
         </Pressable>
       </View>
 
