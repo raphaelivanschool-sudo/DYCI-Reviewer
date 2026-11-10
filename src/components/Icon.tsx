@@ -40,6 +40,7 @@ const ICONS = {
   flask: <><Path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3" /><Path d="M7 15h10" /></>,
   dumbbell: <Path d="M6 7v10M18 7v10M3 9.5v5M21 9.5v5M6 12h12" />,
   shuffle: <Path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />,
+  retry: <><Path d="M3 12a9 9 0 1 0 3-6.7" /><Path d="M3 4v5h5" /></>,
   calendar: <><Rect x="3" y="5" width="18" height="16" rx="2" /><Path d="M3 10h18M8 3v4M16 3v4" /></>,
   download: <Path d="M12 4v12M7 11l5 5 5-5M4 20h16" />,
   image: <><Rect x="3" y="4" width="18" height="16" rx="2" /><Circle cx="9" cy="10" r="2" /><Path d="m21 16-5-5-9 9" /></>,

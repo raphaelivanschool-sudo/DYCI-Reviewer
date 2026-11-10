@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
 import { AvatarView, LevelBadge, XpBar, XpPill } from '@/components/game';
@@ -243,35 +243,40 @@ function BuddyCard() {
 
   if (!profile || !line) return null;
   const streak = liveStreak(profile);
+  // Fixed sizes: the card, the robot and the bubble never change size when METANOIA's line changes,
+  // so nothing below the card jumps. Long lines get a smaller font instead of a taller bubble.
+  const robotSize = compact ? 104 : 128;
+  const cardHeight = compact ? 196 : 214;
+  const textSize = line.text.length > 90 ? 12.5 : line.text.length > 60 ? 13.5 : 14.5;
   return (
-    <View style={{ backgroundColor: '#fff', borderRadius: 26, marginBottom: 12, overflow: 'hidden', borderBottomWidth: 4, borderBottomColor: C.line }}>
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 58, backgroundColor: C.primary50 }} />
+    <View style={{ height: cardHeight, backgroundColor: '#fff', borderRadius: 26, marginBottom: 12, overflow: 'hidden', borderBottomWidth: 4, borderBottomColor: C.line }}>
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 52, backgroundColor: C.primary50 }} />
+      <Pressable accessibilityRole="button" accessibilityLabel={`METANOIA says: ${line.text}. Tap to chat`} onPress={() => router.push('/chat')} style={StyleSheet.absoluteFill}>
+        <View style={{ position: 'absolute', left: 6, bottom: 8 }}>
+          <Robot ref={robot} size={robotSize} outfit={profile.outfit} mood={line.mood} intro="wave" />
+        </View>
+        <View style={{ position: 'absolute', left: 12, bottom: 10, backgroundColor: C.success50, borderRadius: 99, paddingHorizontal: 9, height: 22, justifyContent: 'center' }}>
+          <T w={900} size={11} color={C.success700} numberOfLines={1}>Mood: {line.mood}</T>
+        </View>
+        <View style={{ position: 'absolute', left: robotSize + 10, right: 12, top: 54, bottom: 12 }}>
+          {/* The old and new bubbles fade on top of each other inside a fixed box. */}
+          <View style={{ flex: 1 }}>
+            <Animated.View key={line.text} entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#fff', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 2, borderColor: C.line, borderBottomWidth: 4, justifyContent: 'center' }}>
+              <T w={800} size={textSize} numberOfLines={5} adjustsFontSizeToFit minimumFontScale={0.8}>{line.text}</T>
+            </Animated.View>
+          </View>
+          <View style={{ height: 30, flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
+            <Icon name="chat" size={15} color={C.primary700} />
+            <T w={900} size={13} color={C.primary700} numberOfLines={1} style={{ flexShrink: 1 }}>{lang === 'tl' ? 'I-tap para mag-chat' : 'Tap me to chat'}</T>
+          </View>
+        </View>
+      </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={`${streak}-day streak. Open My Journey`} onPress={() => router.push('/journey')}
-        style={{ position: 'absolute', right: 12, top: 12, zIndex: 2, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF7ED', borderWidth: 2, borderColor: '#FED7AA', borderBottomWidth: 4, borderRadius: 99, paddingHorizontal: 10, height: 34 }}>
+        style={{ position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF7ED', borderWidth: 2, borderColor: '#FED7AA', borderBottomWidth: 4, borderRadius: 99, paddingHorizontal: 10, height: 34 }}>
         <Icon name="flame" size={17} color="#EA580C" />
         <T w={900} color="#C2410C">{streak} {streak === 1 ? 'day' : 'days'}</T>
         <Icon name="right" size={14} color="#C2410C" />
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`METANOIA says: ${line.text}. Tap to chat`} onPress={() => router.push('/chat')}
-        style={{ flexDirection: 'row', alignItems: 'flex-end', paddingTop: 54, paddingHorizontal: 10, paddingBottom: 12, minHeight: compact ? 170 : 200 }}>
-        {/* Smaller robot on narrow phones so the speech bubble keeps enough room. */}
-        <Robot ref={robot} size={compact ? 104 : 140} outfit={profile.outfit} mood={line.mood} intro="wave" />
-        {/* Bubble and labels share one column, so long text wraps instead of being cut off. */}
-        <View style={{ flex: 1, marginLeft: -4, gap: 10 }}>
-          <Animated.View key={line.text} entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}
-            style={{ backgroundColor: '#fff', borderRadius: 18, padding: 12, borderWidth: 2, borderColor: C.line, borderBottomWidth: 4 }}>
-            <T w={800} size={14.5}>{line.text}</T>
-          </Animated.View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 8, rowGap: 4 }}>
-            <View style={{ backgroundColor: C.success50, borderRadius: 99, paddingHorizontal: 9, height: 24, justifyContent: 'center' }}>
-              <T w={900} size={11.5} color={C.success700}>Mood: {line.mood}</T>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Icon name="chat" size={15} color={C.primary700} />
-              <T w={900} size={13} color={C.primary700}>{lang === 'tl' ? 'I-tap para mag-chat' : 'Tap me to chat'}</T>
-            </View>
-          </View>
-        </View>
       </Pressable>
     </View>
   );

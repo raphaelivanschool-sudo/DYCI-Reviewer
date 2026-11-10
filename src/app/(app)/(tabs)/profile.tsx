@@ -109,7 +109,7 @@ export default function Profile() {
           <Row icon="flame" title="My Journey" sub="Streak, goals and rewards" onPress={() => router.push('/journey')} />
           <Row icon="gift" title="Level rewards" sub={next ? `Next: ${next.label} at Level ${next.level}` : 'All rewards unlocked!'} onPress={() => router.push('/rewards')} />
           <Row icon="calendar" title="My class schedule" sub={classes.length ? `${new Set(classes.map((c) => c.subject)).size} subjects · reminders ${profile.remindersOn ? 'on' : 'off'}` : 'Not set up yet'} onPress={() => router.navigate({ pathname: '/schedule', params: { tab: 'classes' } })} />
-          <Row icon="shirt" title="My METANOIA buddy" sub="Skins, outfits and gestures" onPress={() => router.push('/buddy')} last />
+          <Row icon="shirt" title="My METANOIA buddy" sub="Outfits and gestures" onPress={() => router.push('/buddy')} last />
         </Card>
 
         <GroupLabel>Study</GroupLabel>

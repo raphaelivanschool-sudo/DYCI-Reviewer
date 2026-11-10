@@ -127,7 +127,7 @@ export default function Results() {
         </Card>
       </Scroll>
       <Footer row>
-        <Btn title="Retry" variant="ghost" style={{ flex: 1 }} onPress={() => router.replace({ pathname: '/briefing/[id]', params: { id: attempt.reviewerId } })} />
+        <Btn title="Retry" icon="retry" variant="ghost" style={{ flex: 1 }} onPress={() => router.replace({ pathname: '/briefing/[id]', params: { id: attempt.reviewerId } })} />
         <Btn title="Dashboard" icon="home" variant="gold" style={{ flex: 1.4 }} onPress={() => router.dismissTo('/home')} />
       </Footer>
     </Screen>
