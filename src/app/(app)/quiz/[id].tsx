@@ -1,6 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, useWindowDimensions, View } from 'react-native';
+
+import { AnswerArea, QuestionPrompt } from '@/components/QuestionAnswer';
+import { correctAnswerText, pointsOf, typeLabel, typeOf } from '@/lib/question-types';
 import Animated, { FadeInDown, FadeOut, ZoomIn } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +20,6 @@ import { column, CONTENT_MAX } from '@/lib/responsive';
 import type { Attempt, Question } from '@/lib/types';
 import { C } from '@/theme';
 
-const KEYS = ['A', 'B', 'C', 'D', 'E'];
 const PRAISE = {
   en: ['Great! Correct!', 'Awesome!', 'Nice one!', 'Perfect!'],
   tl: ['Galing! Correct!', 'Ayos! Tama!', 'Nice one!', 'Perfect!'],
@@ -51,6 +53,9 @@ export default function Quiz() {
   const [picked, setPicked] = useState<number | null>(null); // -1 = time ran out
   const [correct, setCorrect] = useState(0);
   const [byTopic, setByTopic] = useState<Attempt['byTopic']>({});
+  const [byType, setByType] = useState<Attempt['byTopic']>({});
+  // Points of the current question once answered (a matching set can be partly right).
+  const [result, setResult] = useState<{ points: number; max: number } | null>(null);
   const [missed, setMissed] = useState<string[]>([]);
   const [combo, setCombo] = useState(0);
   const [bestCombo, setBestCombo] = useState(0);
@@ -74,11 +79,12 @@ export default function Quiz() {
       setIdx(reviewer.answered);
       setCorrect(reviewer.partialCorrect ?? 0);
       setByTopic(reviewer.partialByTopic ?? {});
+      setByType(reviewer.partialByType ?? {});
     }
   }
 
   const q = questions?.[idx];
-  const answered = picked !== null;
+  const answered = result !== null;
 
   // Per-question countdown.
   useEffect(() => {
@@ -89,7 +95,7 @@ export default function Quiz() {
       setLeft(remaining);
       if (remaining === 0) {
         clearInterval(t);
-        record(-1);
+        record(0, -1);
       }
     }, 250);
     return () => clearInterval(t);
@@ -106,19 +112,28 @@ export default function Quiz() {
       </Screen>
     );
 
-  const isRight = picked === q.answerIndex;
+  const isRight = !!result && result.points === result.max;
+  // Every matching pair is an item, so the score is out of points, not questions.
+  const totalPoints = questions.reduce((n, x) => n + pointsOf(x), 0);
   const last = idx === questions.length - 1;
 
-  function record(i: number) {
-    if (!q || picked !== null) return;
-    setPicked(i);
-    const ok = i === q.answerIndex;
+  function record(points: number, i?: number) {
+    if (!q || result) return;
+    const max = pointsOf(q);
+    const ok = points >= max;
+    setPicked(i ?? null);
+    setResult({ points, max });
     const nextCombo = ok ? combo + 1 : 0;
     const fast = !!timerSec && Date.now() - startedAt.current <= (timerSec * 1000) / 3;
-    const earned = ok ? answerXp(nextCombo, fast) : 0;
-    const nextCorrect = correct + (ok ? 1 : 0);
+    // A partly right matching set still earns a little XP per pair.
+    const earned = ok ? answerXp(nextCombo, fast) : points * 5;
+    const nextCorrect = correct + points;
     const cur = byTopic[q.topic] ?? { correct: 0, total: 0 };
-    const nextByTopic = { ...byTopic, [q.topic]: { correct: cur.correct + (ok ? 1 : 0), total: cur.total + 1 } };
+    const nextByTopic = { ...byTopic, [q.topic]: { correct: cur.correct + points, total: cur.total + max } };
+    const kind = typeOf(q);
+    const curT = byType[kind] ?? { correct: 0, total: 0 };
+    const nextByType = { ...byType, [kind]: { correct: curT.correct + points, total: curT.total + max } };
+    setByType(nextByType);
     setCombo(nextCombo);
     setBestCombo((b) => Math.max(b, nextCombo));
     setXp((x) => x + earned);
@@ -126,7 +141,7 @@ export default function Quiz() {
     setCorrect(nextCorrect);
     setByTopic(nextByTopic);
     if (!ok) setMissed((m) => [...m, q.prompt]);
-    if (!shuffle && idx + 1 < questions!.length) saveProgress(uid, id, idx + 1, nextCorrect, nextByTopic).catch(() => {});
+    if (!shuffle && idx + 1 < questions!.length) saveProgress(uid, id, idx + 1, nextCorrect, nextByTopic, nextByType).catch(() => {});
   }
 
   const next = async () => {
@@ -135,11 +150,12 @@ export default function Quiz() {
       setLeft(timerSec);
       setIdx(idx + 1);
       setPicked(null);
+      setResult(null);
       return;
     }
     setSaving(true);
     try {
-      const res = await saveAttempt(uid, reviewer, { correct, total: questions.length, byTopic, missed, xpEarned: xp, bestCombo });
+      const res = await saveAttempt(uid, reviewer, { correct, total: totalPoints, byTopic, byType, missed, xpEarned: xp, bestCombo });
       router.replace({ pathname: '/results/[id]', params: { id: res.id, badges: res.newBadges.join('|') } });
     } catch {
       setSaving(false);
@@ -195,36 +211,12 @@ export default function Quiz() {
             </View>
           )}
           <View style={{ flex: 1 }}>
-            <T w={900} size={12.5} color={C.primary700} style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>{q.topic}</T>
+            <T w={900} size={12.5} color={C.primary700} style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>{typeLabel(q.type)} · {q.topic}</T>
             {timerSec > 0 && <T w={800} size={12.5} color="#B45309">Answer within {Math.max(1, Math.round(timerSec / 3))}s for bonus XP</T>}
           </View>
         </View>
-        <T w={900} size={21} style={{ marginTop: 12, marginBottom: 18, lineHeight: 28 }}>{q.prompt}</T>
-        <View style={{ gap: 12 }}>
-          {q.choices.map((choice, i) => {
-            const isAnswer = answered && i === q.answerIndex;
-            const isWrongPick = answered && i === picked && !isRight;
-            const faded = answered && !isAnswer && !isWrongPick;
-            return (
-              <Pressable key={i} accessibilityRole="button" accessibilityLabel={`Answer ${KEYS[i]}: ${choice}`}
-                accessibilityState={{ selected: picked === i, disabled: answered }} onPress={() => record(i)}
-                style={({ pressed }) => ({
-                  flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 62, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 18, borderWidth: 2, borderBottomWidth: pressed && !answered ? 2 : 5,
-                  backgroundColor: isAnswer ? C.success50 : isWrongPick ? C.danger50 : C.surface,
-                  borderColor: isAnswer ? '#22C55E' : isWrongPick ? C.danger : C.line,
-                  borderBottomColor: isAnswer ? '#86EFAC' : isWrongPick ? '#FCA5A5' : C.line,
-                  opacity: faded ? 0.45 : 1, transform: [{ translateY: pressed && !answered ? 3 : 0 }],
-                })}>
-                <View style={{ width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: isAnswer ? '#22C55E' : isWrongPick ? C.danger : C.chip }}>
-                  <T w={900} color={isAnswer || isWrongPick ? '#fff' : C.ink2}>{KEYS[i]}</T>
-                </View>
-                <T w={800} size={16} style={{ flex: 1 }}>{choice}</T>
-                {isAnswer && <Icon name="check" color={C.success} strokeWidth={3} />}
-                {isWrongPick && <Icon name="x" color={C.danger} strokeWidth={3} />}
-              </Pressable>
-            );
-          })}
-        </View>
+        <QuestionPrompt q={q} />
+        <AnswerArea key={q.id} q={q} answered={answered} picked={picked} onAnswer={record} />
       </Scroll>
 
       {gain && (
@@ -240,9 +232,12 @@ export default function Quiz() {
             <Robot size={48} mood={isRight ? 'excited' : 'worried'} intro={isRight ? 'cheer' : 'no'} />
             <View style={{ flex: 1 }}>
               <T w={900} size={19} color={isRight ? C.success700 : '#B91C1C'}>
-                {isRight ? PRAISE[lang][idx % PRAISE[lang].length] : picked === -1 ? 'Time’s up!' : 'Not quite'}
+                {isRight ? PRAISE[lang][idx % PRAISE[lang].length] : picked === -1 ? 'Time’s up!' : result && result.max > 1 && result.points > 0 ? `${result.points} of ${result.max} right` : 'Not quite'}
               </T>
-              <T w={600} size={13.5} color={isRight ? '#14532D' : '#7F1D1D'}>{q.explanation}</T>
+              {!isRight && typeOf(q) !== 'mcq' && typeOf(q) !== 'tf' && (
+                <T w={800} size={13.5} color="#7F1D1D">Answer: {correctAnswerText(q)}</T>
+              )}
+              {q.explanation ? <T w={600} size={13.5} color={isRight ? '#14532D' : '#7F1D1D'}>{q.explanation}</T> : null}
             </View>
           </View>
           <Btn title={last ? 'See my score' : 'Continue'} variant={isRight ? 'success' : 'primary'} onPress={next} loading={saving} style={[column, { marginTop: 14 }]} />

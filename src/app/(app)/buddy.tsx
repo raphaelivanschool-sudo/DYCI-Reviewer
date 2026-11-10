@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
 
@@ -7,6 +8,7 @@ import { Card, Grid, Header, LinkText, Screen, Scroll, Section, T } from '@/comp
 import type { Gesture } from '@/lib/ai';
 import { useAuth, useUid } from '@/lib/auth-context';
 import { updateProfileFields, useReviewers } from '@/lib/db';
+import { levelInfo, skinLevel, SKINS } from '@/lib/game';
 import { useResponsive } from '@/lib/responsive';
 import { DEFAULT_OUTFIT, type Outfit, type OutfitSlot } from '@/lib/types';
 import { C, shadow } from '@/theme';
@@ -28,6 +30,7 @@ export default function Buddy() {
   if (!profile) return null;
 
   const outfit = profile.outfit ?? DEFAULT_OUTFIT;
+  const level = levelInfo(profile.stats.xp).level;
   const unlock = { streak: profile.stats.streak, perfectScores: profile.stats.perfectScores, reviewers: reviewers.length };
 
   const play = (g: Gesture | 'random') => {
@@ -65,7 +68,34 @@ export default function Buddy() {
           </Grid>
         </Section>
 
-        <Section title="Outfit" action={<LinkText title="Reset" onPress={() => wear(DEFAULT_OUTFIT)} />}>
+        <Section title="Skin" action={<LinkText title="All rewards" onPress={() => router.push('/rewards')} />}>
+          <Grid columns={3} gap={8}>
+            {SKINS.map((s) => {
+              const need = skinLevel(s.id);
+              const locked = level < need;
+              const on = (outfit.skin ?? 'classic') === s.id;
+              return (
+                <Pressable key={s.id} accessibilityRole="button" disabled={locked} onPress={() => wear({ ...outfit, skin: s.id })}
+                  accessibilityLabel={locked ? `${s.label} skin, locked until level ${need}` : `${s.label} skin`}
+                  accessibilityState={{ selected: on, disabled: locked }}
+                  style={{ minHeight: 116, borderRadius: 16, borderWidth: 2, borderColor: on ? C.primary : C.line, backgroundColor: locked ? '#F8FAFC' : on ? C.primary50 : C.surface, alignItems: 'center', paddingTop: 8, paddingBottom: 10, gap: 4 }}>
+                  <View style={{ opacity: locked ? 0.4 : 1 }}>
+                    <Robot size={62} outfit={{ ...outfit, skin: s.id }} still />
+                  </View>
+                  <T w={800} size={13.5} color={on ? C.primary700 : C.ink2} numberOfLines={1}>{s.label}</T>
+                  {locked && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                      <Icon name="lock" size={12} color={C.muted} />
+                      <T w={700} size={11.5} color={C.muted}>Level {need}</T>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </Grid>
+        </Section>
+
+        <Section title="Outfit" action={<LinkText title="Reset" onPress={() => wear({ ...DEFAULT_OUTFIT, skin: outfit.skin })} />}>
           {SLOTS.map(({ slot, label }) => (
             <View key={slot}>
               <T w={900} size={13} color={C.muted} style={{ textTransform: 'uppercase', letterSpacing: 0.6, marginTop: slot === 'head' ? 0 : 16, marginBottom: 8, marginHorizontal: 2 }}>{label}</T>
@@ -73,7 +103,7 @@ export default function Buddy() {
                 {OUTFIT_ITEMS.filter((i) => i.slot === slot).map((item) => {
                   const locked = item.lock ? !item.lock.ok(unlock) : false;
                   const on = outfit[slot] === item.id;
-                  const preview: Outfit = { ...DEFAULT_OUTFIT, [slot]: item.id };
+                  const preview: Outfit = { ...DEFAULT_OUTFIT, skin: outfit.skin, [slot]: item.id };
                   return (
                     <Pressable
                       key={item.id}

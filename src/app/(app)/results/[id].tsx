@@ -8,8 +8,9 @@ import { Icon } from '@/components/Icon';
 import { Robot } from '@/components/Robot';
 import { Btn, Card, Footer, HeaderDecor, Loading, Screen, Scroll, Section, T } from '@/components/ui';
 import { useAuth, useUid } from '@/lib/auth-context';
-import { useAttempts, useReviewers } from '@/lib/db';
-import { levelInfo, liveStreak, starsFor } from '@/lib/game';
+import { useAttempts } from '@/lib/db';
+import { levelInfo, liveStreak, nextReward, starsFor } from '@/lib/game';
+import { QUESTION_TYPES } from '@/lib/question-types';
 import { C } from '@/theme';
 
 const badgeName = (b: string) => (b.startsWith('topic:') ? `Topic Master: ${b.slice(6)}` : b === 'first-step' ? 'First Step' : b);
@@ -20,21 +21,18 @@ export default function Results() {
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
   const attempt = useAttempts(uid, undefined, 20).data.find((a) => a.id === id);
-  const reviewers = useReviewers(uid).data;
   if (!attempt || !profile) return <Loading />;
 
   const stars = attempt.stars ?? starsFor(attempt.percent);
   const cleared = stars > 0;
   const lvl = levelInfo(profile.stats.xp);
+  const reward = nextReward(profile.stats.xp);
   const newBadges = (badges ?? '').split('|').filter(Boolean);
   const topics = Object.entries(attempt.byTopic)
     .map(([name, t]) => ({ name, pct: Math.round((t.correct / t.total) * 100), ...t }))
     .sort((a, b) => a.pct - b.pct);
   const weak = topics.find((t) => t.pct < 75);
 
-  // "Next stage": another lesson in the same subject that is not cleared yet.
-  const current = reviewers.find((r) => r.id === attempt.reviewerId);
-  const nextStage = reviewers.find((r) => r.id !== attempt.reviewerId && r.folderId === current?.folderId && (r.bestPercent ?? 0) < 50);
 
   return (
     <Screen>
@@ -63,6 +61,11 @@ export default function Results() {
             <View style={{ width: `${(lvl.into / lvl.need) * 100}%`, height: '100%', borderRadius: 99, backgroundColor: '#FBBF24' }} />
           </View>
           <T w={700} size={12.5} color={C.muted} style={{ marginTop: 6 }}>{lvl.toNext} XP more to level up!</T>
+          {reward && (
+            <T w={700} size={12.5} color={C.muted} onPress={() => router.push('/rewards')}>
+              Next reward: <T w={900} size={12.5} color="#B45309">{reward.label}</T> at Level {reward.level}
+            </T>
+          )}
         </Card>
 
         {newBadges.map((b) => (
@@ -76,6 +79,23 @@ export default function Results() {
             </View>
           </View>
         ))}
+
+        {Object.keys(attempt.byType ?? {}).length > 1 && (
+          <Section title="Score per type">
+            <Card style={{ gap: 10 }}>
+              {QUESTION_TYPES.filter((t) => attempt.byType?.[t.id]).map((t) => {
+                const s = attempt.byType![t.id];
+                const pct = s.total ? s.correct / s.total : 0;
+                return (
+                  <View key={t.id} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <T w={800}>{t.label}</T>
+                    <T w={900} color={pct >= 0.75 ? C.success700 : pct >= 0.5 ? '#B45309' : '#B91C1C'}>{s.correct} / {s.total}</T>
+                  </View>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
 
         <Section title="Score by topic">
           <Card style={{ gap: 14 }}>
@@ -108,11 +128,7 @@ export default function Results() {
       </Scroll>
       <Footer row>
         <Btn title="Retry" variant="ghost" style={{ flex: 1 }} onPress={() => router.replace({ pathname: '/briefing/[id]', params: { id: attempt.reviewerId } })} />
-        {nextStage ? (
-          <Btn title="Next stage" variant="gold" style={{ flex: 1.4 }} onPress={() => router.replace({ pathname: '/briefing/[id]', params: { id: nextStage.id } })} />
-        ) : (
-          <Btn title="Done" variant="gold" style={{ flex: 1.4 }} onPress={() => router.replace('/home')} />
-        )}
+        <Btn title="Dashboard" icon="home" variant="gold" style={{ flex: 1.4 }} onPress={() => router.dismissTo('/home')} />
       </Footer>
     </Screen>
   );

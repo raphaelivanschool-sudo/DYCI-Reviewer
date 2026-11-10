@@ -87,7 +87,7 @@ export function AvatarPicker({ uid, profile, visible, onClose }: { uid: string; 
               );
             })}
           </Grid>
-          <T w={700} size={12.5} color={C.muted} style={{ textAlign: 'center' }}>Locked characters unlock at Level 10 and Level 15.</T>
+          <T w={700} size={12.5} color={C.muted} style={{ textAlign: 'center' }}>Locked characters unlock at {CHARACTERS.filter((c) => c.level > 1).map((c) => `Level ${c.level}`).join(' and ')}.</T>
         </ScrollView>
       </View>
     </Modal>

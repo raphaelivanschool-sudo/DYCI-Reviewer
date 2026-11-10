@@ -21,7 +21,7 @@ export const TERMS: LegalSection[] = [
     body: [
       'Give correct information when you sign up and keep your password private. You are responsible for what happens under your account.',
       'If you are under 18, use the app with the knowledge of a parent or guardian.',
-      'You must verify your email with the 6-digit code we send you before you can use the app.',
+      'You must verify your email by tapping the link we send you before you can use the app.',
     ],
   },
   {
@@ -77,7 +77,7 @@ export const PRIVACY: LegalSection[] = [
   {
     title: '3. Services we use',
     body: [
-      'Your data is stored with Google Firebase (sign-in, database and file storage). To make reviewers and chat answers, the text or files you send are processed by Google’s Gemini AI. To send your 6-digit verification code, your email address is given to our email provider.',
+      'Your data is stored with Google Firebase (sign-in, database and file storage). To make reviewers and chat answers, the text or files you send are processed by Google’s Gemini AI. Firebase also uses your email address to send the verification and password-reset emails.',
       'These providers process data on our behalf and may store it outside the Philippines.',
     ],
   },

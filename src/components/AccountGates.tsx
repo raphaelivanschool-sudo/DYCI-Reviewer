@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { BackHandler, KeyboardAvoidingView, Linking, Platform, Pressable, TextInput, View, type TextInputInstance } from 'react-native';
+import { BackHandler, Linking, Platform, Pressable, View } from 'react-native';
 
-import { functionErrorMessage, useAuth } from '@/lib/auth-context';
+import { authErrorMessage, useAuth } from '@/lib/auth-context';
 import { claimReward } from '@/lib/db';
 import { liveStreak, levelInfo, XP } from '@/lib/game';
 import { column } from '@/lib/responsive';
@@ -14,13 +14,13 @@ import { Robot } from './Robot';
 import { Btn, Card, Footer, Header, HeaderChip, HeaderDecor, LinkText, Screen, Scroll, StepBar, T, Toggle } from './ui';
 
 const RESEND_SECONDS = 60;
-const CODE_LENGTH = 6;
 
-/** Step 2 of sign-up: we emailed a 6-digit code; the student types it here. */
+/**
+ * Step 2 of sign-up: Firebase emailed a verification link; the student taps it in their inbox.
+ * We check every few seconds (and when they tap the button), so the app moves on by itself.
+ */
 export function VerifyEmail() {
-  const { user, sendVerification, verifyCode, logOut } = useAuth();
-  const input = useRef<TextInputInstance>(null);
-  const [code, setCode] = useState('');
+  const { user, sendVerification, checkVerified, logOut } = useAuth();
   const [cooldown, setCooldown] = useState(RESEND_SECONDS);
   const [checking, setChecking] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -30,105 +30,78 @@ export function VerifyEmail() {
     return () => clearInterval(t);
   }, []);
 
+  // Quietly re-check while this screen is open: tapping the link in Gmail is enough.
+  useEffect(() => {
+    const t = setInterval(() => checkVerified().catch(() => {}), 4000);
+    return () => clearInterval(t);
+    // checkVerified is re-created on every render; start the timer once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const send = async () => {
     setMsg(null);
     try {
       await sendVerification();
       setCooldown(RESEND_SECONDS);
-      setCode('');
-      setMsg({ text: 'We sent a new code. Check your inbox.', ok: true });
+      setMsg({ text: 'We sent a new link. Check your inbox.', ok: true });
     } catch (e) {
-      setMsg({ text: functionErrorMessage(e), ok: false });
+      setMsg({ text: authErrorMessage(e), ok: false });
     }
   };
 
-  const submit = async (value = code) => {
-    if (value.length !== CODE_LENGTH || checking) return;
+  const check = async () => {
     setChecking(true);
     setMsg(null);
     try {
-      await verifyCode(value); // on success the app layout moves on by itself
+      // On success the app layout moves on by itself.
+      if (!(await checkVerified())) setMsg({ text: 'Not verified yet. Open the email and tap the link first.', ok: false });
     } catch (e) {
-      setMsg({ text: functionErrorMessage(e), ok: false });
+      setMsg({ text: authErrorMessage(e), ok: false });
     } finally {
       setChecking(false);
     }
   };
 
-  const onChange = (v: string) => {
-    const digits = v.replace(/\D/g, '').slice(0, CODE_LENGTH);
-    setCode(digits);
-    if (digits.length === CODE_LENGTH) submit(digits);
-  };
-
   return (
     <Screen>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Header title="Check your email" sub="Step 2 of 3 · Verify it's you" onBack={logOut}>
-          <StepBar step={2} />
-        </Header>
-        <Scroll>
-          <View style={{ alignItems: 'center', marginTop: 6 }}>
-            <View style={{ width: 170, height: 140 }}>
-              <View style={{ position: 'absolute', left: 20, top: 40, width: 130, height: 92, borderRadius: 18, backgroundColor: '#FBBF24', borderBottomWidth: 6, borderBottomColor: '#B45309', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="mail" size={56} color="#422006" strokeWidth={2.4} />
-              </View>
-              <View style={{ position: 'absolute', right: -10, top: -6 }}><Robot size={78} intro="wave" mood="excited" /></View>
+      <Header title="Check your email" sub="Step 2 of 3 · Verify it's you" onBack={logOut}>
+        <StepBar step={2} />
+      </Header>
+      <Scroll>
+        <View style={{ alignItems: 'center', marginTop: 6 }}>
+          <View style={{ width: 170, height: 140 }}>
+            <View style={{ position: 'absolute', left: 20, top: 40, width: 130, height: 92, borderRadius: 18, backgroundColor: '#FBBF24', borderBottomWidth: 6, borderBottomColor: '#B45309', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="mail" size={56} color="#422006" strokeWidth={2.4} />
             </View>
-            <T w={900} size={22} style={{ textAlign: 'center', marginTop: 10 }}>Type the 6-digit code</T>
-            <T w={700} color={C.muted} style={{ textAlign: 'center', marginTop: 4 }}>
-              We sent a code to{'\n'}<T w={900} color={C.ink}>{user?.email}</T>
-            </T>
+            <View style={{ position: 'absolute', right: -10, top: -6 }}><Robot size={78} intro="wave" mood="excited" /></View>
           </View>
+          <T w={900} size={22} style={{ textAlign: 'center', marginTop: 10 }}>Tap the link we sent</T>
+          <T w={700} color={C.muted} style={{ textAlign: 'center', marginTop: 4 }}>
+            We sent a verification link to{'\n'}<T w={900} color={C.ink}>{user?.email}</T>
+          </T>
+        </View>
 
-          <Pressable accessibilityRole="button" accessibilityLabel="Type the 6-digit code" onPress={() => input.current?.focus()} style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 22 }}>
-            {Array.from({ length: CODE_LENGTH }, (_, i) => {
-              const filled = i < code.length;
-              const active = i === Math.min(code.length, CODE_LENGTH - 1);
-              return (
-                <View key={i} style={{ width: 46, height: 58, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff', borderColor: active ? C.primary : filled ? '#93C5FD' : C.line }}>
-                  <T w={900} size={26}>{code[i] ?? ''}</T>
-                </View>
-              );
-            })}
-          </Pressable>
-          {/* The real input is invisible; the boxes above only display what is typed. */}
-          <TextInput
-            ref={input}
-            value={code}
-            onChangeText={onChange}
-            keyboardType="number-pad"
-            maxLength={CODE_LENGTH}
-            autoFocus
-            autoComplete="sms-otp"
-            textContentType="oneTimeCode"
-            accessibilityLabel="6-digit code"
-            caretHidden
-            style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }}
-          />
-
-          <View style={{ marginTop: 18, padding: 12, borderRadius: 18, borderWidth: 2, borderStyle: 'dashed', borderColor: '#93C5FD', backgroundColor: C.primary50, flexDirection: 'row', gap: 10 }}>
-            <Icon name="mail" color={C.primary700} />
-            <View style={{ flex: 1, gap: 4 }}>
-              <T w={700} size={13.5} color={C.ink2}>Didn’t get it? Check <T w={900} size={13.5}>Spam</T> or <T w={900} size={13.5}>Promotions</T>. The code lasts 10 minutes.</T>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                {cooldown > 0 ? <T w={800} size={13.5} color={C.muted}>Send a new code in {cooldown}s</T> : <LinkText title="Send a new code" onPress={send} />}
-                <T w={700} size={13.5} color={C.muted}>·</T>
-                <LinkText title="Use another email" onPress={logOut} />
-              </View>
+        <View style={{ marginTop: 18, padding: 12, borderRadius: 18, borderWidth: 2, borderStyle: 'dashed', borderColor: '#93C5FD', backgroundColor: C.primary50, flexDirection: 'row', gap: 10 }}>
+          <Icon name="mail" color={C.primary700} />
+          <View style={{ flex: 1, gap: 4 }}>
+            <T w={700} size={13.5} color={C.ink2}>Open the email from METAKNOWIA and tap the link. Then come back here. Can’t find it? Check <T w={900} size={13.5}>Spam</T> or <T w={900} size={13.5}>Promotions</T>.</T>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              {cooldown > 0 ? <T w={800} size={13.5} color={C.muted}>Send a new link in {cooldown}s</T> : <LinkText title="Resend link" onPress={send} />}
+              <T w={700} size={13.5} color={C.muted}>·</T>
+              <LinkText title="Use another email" onPress={logOut} />
             </View>
           </View>
-          {msg && <T w={700} color={msg.ok ? C.success700 : C.danger} style={{ marginTop: 12, textAlign: 'center' }}>{msg.text}</T>}
-        </Scroll>
-        <Footer>
-          <Btn title="Verify" onPress={() => submit()} loading={checking} disabled={code.length !== CODE_LENGTH} />
-          {Platform.OS !== 'web' && (
-            <View style={{ alignItems: 'center', marginTop: 12 }}>
-              <LinkText title="Open my email app" onPress={() => Linking.openURL(Platform.OS === 'ios' ? 'message://' : 'mailto:')} />
-            </View>
-          )}
-        </Footer>
-      </KeyboardAvoidingView>
+        </View>
+        {msg && <T w={700} color={msg.ok ? C.success700 : C.danger} style={{ marginTop: 12, textAlign: 'center' }}>{msg.text}</T>}
+      </Scroll>
+      <Footer>
+        <Btn title="I’ve verified my email" onPress={check} loading={checking} />
+        {Platform.OS !== 'web' && (
+          <View style={{ alignItems: 'center', marginTop: 12 }}>
+            <LinkText title="Open my email app" onPress={() => Linking.openURL(Platform.OS === 'ios' ? 'message://' : 'mailto:')} />
+          </View>
+        )}
+      </Footer>
     </Screen>
   );
 }

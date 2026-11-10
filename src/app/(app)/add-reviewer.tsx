@@ -15,7 +15,8 @@ import { notify } from '@/lib/confirm';
 import { useAuth, useUid } from '@/lib/auth-context';
 import { saveReviewer, useFolders } from '@/lib/db';
 import { storage } from '@/lib/firebase';
-import type { Difficulty, SourceType } from '@/lib/types';
+import { MIX_MAX, MIX_MIN, QUESTION_TYPES, totalOf, type TypeCounts } from '@/lib/question-types';
+import type { Difficulty, QuestionType, SourceType } from '@/lib/types';
 import { C, F, shadow } from '@/theme';
 
 type Picked = { uri: string; name: string; mimeType: string; width?: number };
@@ -53,6 +54,8 @@ export default function AddReviewer() {
   const [title, setTitle] = useState(params.title ?? '');
   const [folderId, setFolderId] = useState<string | null>(params.folderId ?? null);
   const [count, setCount] = useState(10);
+  const [mode, setMode] = useState<QuestionType | 'mix'>('mcq');
+  const [mix, setMix] = useState<TypeCounts>({ fill: 20, mcq: 15, id: 15 });
   const [difficulty, setDifficulty] = useState<Difficulty>('Medium');
   const [step, setStep] = useState<'form' | 'working'>('form');
   const [stage, setStage] = useState(0);
@@ -86,7 +89,12 @@ export default function AddReviewer() {
 
   const setCountSafe = (n: number) => setCount(Math.min(MAX_COUNT, Math.max(1, Math.round(n) || 1)));
 
-  const ready = title.trim() && (source === 'text' ? text.trim().length > 20 : source === 'file' ? !!file : photos.length > 0);
+  // What to ask the AI for: one type with `count` items, or the Mix counts.
+  const types: TypeCounts = mode === 'mix' ? Object.fromEntries(Object.entries(mix).filter(([, n]) => (n ?? 0) > 0)) : { [mode]: count };
+  const total = totalOf(types);
+  const mixOk = mode !== 'mix' || (Object.keys(types).length >= 2 && total >= MIX_MIN && total <= MIX_MAX);
+  const lessonOk = source === 'text' ? text.trim().length > 20 : source === 'file' ? !!file : photos.length > 0;
+  const ready = title.trim() && lessonOk && mixOk;
 
   const generate = async () => {
     setStep('working');
@@ -102,8 +110,8 @@ export default function AddReviewer() {
           : [{ mimeType: files[0].mimeType, base64: await readAsBase64(files[0].uri) }];
       setStage(1);
       const out = await withTimeout(
-        generateReviewer({ title, sourceType: source, text: source === 'text' ? text : undefined, storagePath, attachments, count, difficulty }),
-        240_000,
+        generateReviewer({ title, sourceType: source, text: source === 'text' ? text : undefined, storagePath, attachments, count: total, types, difficulty }),
+        total > 60 ? 300_000 : 240_000,
         'The AI is taking too long. Check your internet and try again.',
       );
       setStage(2);
@@ -207,8 +215,36 @@ export default function AddReviewer() {
             <SubjectPicker uid={uid} folders={folders} value={folderId} onChange={setFolderId} />
           </Step>
 
-          <Step n={3} title="How many and how hard?">
-            <T w={800} size={14.5} color={C.ink2}>Number of questions</T>
+          <Step n={3} title="Question type">
+            <Grid columns={2} gap={8}>
+              {QUESTION_TYPES.map((t) => {
+                const on = mode === t.id;
+                return (
+                  <Pressable key={t.id} accessibilityRole="radio" accessibilityState={{ checked: on }} accessibilityLabel={`${t.label}. ${t.hint}`} onPress={() => setMode(t.id)}
+                    style={{ minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderRadius: 14, borderWidth: 2, borderBottomWidth: 4, borderColor: on ? C.primary : C.line, backgroundColor: on ? C.primary50 : C.surface }}>
+                    <TypeBadge text={t.badge} />
+                    <T w={800} size={13.5} style={{ flex: 1 }}>{t.label}</T>
+                  </Pressable>
+                );
+              })}
+            </Grid>
+            <Pressable accessibilityRole="radio" accessibilityState={{ checked: mode === 'mix' }} accessibilityLabel="Mix: combine types and set how many items each" onPress={() => setMode('mix')}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, borderWidth: 2, borderBottomWidth: 4, borderColor: mode === 'mix' ? C.primary : C.line, backgroundColor: mode === 'mix' ? C.primary50 : C.surface }}>
+              <TypeBadge text="MIX" gold />
+              <View style={{ flex: 1 }}>
+                <T w={900}>Mix</T>
+                <T w={600} size={12.5} color={C.muted}>Combine types and set how many items each</T>
+              </View>
+            </Pressable>
+            {mode !== 'mix' && <T w={600} size={13} color={C.muted}>{QUESTION_TYPES.find((t) => t.id === mode)?.hint}</T>}
+          </Step>
+
+          <Step n={4} title={mode === 'mix' ? 'Items per type and difficulty' : 'How many and how hard?'}>
+            {mode === 'mix' ? (
+              <MixEditor value={mix} onChange={setMix} />
+            ) : (
+            <>
+            <T w={800} size={14.5} color={C.ink2}>{mode === 'match' ? 'Number of items (pairs)' : 'Number of questions'}</T>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {COUNTS.map((n) => <Chip key={n} title={String(n)} on={!custom && count === n} onPress={() => { setCustom(false); setCount(n); }} style={{ flex: 1, paddingHorizontal: 4 }} />)}
               <Chip title="Custom" on={custom} onPress={() => setCustom(true)} style={{ flex: 1.5, paddingHorizontal: 4 }} />
@@ -223,6 +259,8 @@ export default function AddReviewer() {
                 <T w={700} size={13} color={C.muted}>max {MAX_COUNT}</T>
               </View>
             )}
+            </>
+            )}
             <T w={800} size={14.5} color={C.ink2}>Difficulty</T>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {(['Easy', 'Medium', 'Hard'] as Difficulty[]).map((d) => <Chip key={d} title={d} on={difficulty === d} onPress={() => setDifficulty(d)} style={{ flex: 1, paddingHorizontal: 4 }} />)}
@@ -230,8 +268,12 @@ export default function AddReviewer() {
           </Step>
         </Scroll>
         <Footer>
-          <Btn title="Generate reviewer" icon="sparkles" onPress={generate} disabled={!ready} />
-          {!ready && <T size={13} color={C.muted} style={{ textAlign: 'center', marginTop: 8 }}>Add your lesson and a name to continue</T>}
+          <Btn title={total > 1 ? `Generate ${total}-item reviewer` : 'Generate reviewer'} icon="sparkles" onPress={generate} disabled={!ready} />
+          {!ready && (
+            <T size={13} color={C.muted} style={{ textAlign: 'center', marginTop: 8 }}>
+              {!lessonOk || !title.trim() ? 'Add your lesson and a name to continue' : `Mix: pick at least 2 types, ${MIX_MIN} to ${MIX_MAX} items in total`}
+            </T>
+          )}
         </Footer>
       </KeyboardAvoidingView>
       <Sheet visible={addPhoto} onClose={() => setAddPhoto(false)} title="Add photos of your notes">
@@ -242,12 +284,78 @@ export default function AddReviewer() {
   );
 }
 
-function Stepper({ icon, label, onPress, disabled }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean }) {
+function Stepper({ icon, label, onPress, disabled, small }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean; small?: boolean }) {
+  const d = small ? 36 : 48;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
-      style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 14, backgroundColor: C.primary50, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : pressed ? 0.7 : 1 })}>
-      <Icon name={icon} size={22} color={C.primary700} strokeWidth={3} />
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} hitSlop={small ? 4 : 0}
+      style={({ pressed }) => ({ width: d, height: d, borderRadius: small ? 10 : 14, backgroundColor: C.primary50, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : pressed ? 0.7 : 1 })}>
+      <Icon name={icon} size={small ? 18 : 22} color={C.primary700} strokeWidth={3} />
     </Pressable>
+  );
+}
+
+function TypeBadge({ text, gold }: { text: string; gold?: boolean }) {
+  return (
+    <View style={{ width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: gold ? C.amber50 : C.primary100 }}>
+      <T w={900} size={text.length > 3 ? 10.5 : 12.5} color={gold ? '#B45309' : C.primary700}>{text}</T>
+    </View>
+  );
+}
+
+const MIX_COLORS = ['#2563EB', '#7C3AED', '#0D9488', '#EA580C', '#DB2777', '#CA8A04', '#4F46E5', '#16A34A'];
+
+/** Mix: tick the types, then set the items for each. The total is the sum. */
+function MixEditor({ value, onChange }: { value: TypeCounts; onChange: (v: TypeCounts) => void }) {
+  const total = totalOf(value);
+  const used = QUESTION_TYPES.filter((t) => (value[t.id] ?? 0) > 0);
+  const set = (id: QuestionType, n: number) => {
+    const next = Math.max(0, Math.min(MIX_MAX, Math.round(n) || 0));
+    onChange({ ...value, [id]: next });
+  };
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ backgroundColor: C.navy, borderRadius: 16, padding: 12, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ flex: 1 }}>
+          <T w={800} size={12} color="#BFDBFE">TOTAL ITEMS</T>
+          <T w={900} size={26} color="#fff">{total}</T>
+        </View>
+        <T w={800} size={12.5} color={total > MIX_MAX || total < MIX_MIN ? '#FCA5A5' : '#BFDBFE'} style={{ textAlign: 'right' }}>
+          {used.length} {used.length === 1 ? 'type' : 'types'}{'\n'}{MIX_MIN}–{MIX_MAX} items
+        </T>
+      </View>
+      {total > 0 && (
+        <View style={{ flexDirection: 'row', height: 10, borderRadius: 99, overflow: 'hidden', backgroundColor: C.line }} accessible={false}>
+          {used.map((t) => <View key={t.id} style={{ flex: value[t.id] ?? 0, backgroundColor: MIX_COLORS[QUESTION_TYPES.indexOf(t)] }} />)}
+        </View>
+      )}
+      {QUESTION_TYPES.map((t, i) => {
+        const n = value[t.id] ?? 0;
+        const on = n > 0;
+        return (
+          <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 2, borderColor: on ? '#93C5FD' : C.line, borderRadius: 14, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: C.surface }}>
+            <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={t.label} hitSlop={6} onPress={() => set(t.id, on ? 0 : 5)}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ width: 24, height: 24, borderRadius: 7, borderWidth: 2, borderColor: on ? C.primary : '#CBD5E1', backgroundColor: on ? C.primary : '#fff', alignItems: 'center', justifyContent: 'center' }}>
+                {on && <Icon name="check" size={14} color="#fff" strokeWidth={3.4} />}
+              </View>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: on ? MIX_COLORS[i] : 'transparent' }} />
+              <T w={800} size={13.5} color={on ? C.ink : C.muted} style={{ flex: 1 }} numberOfLines={2}>{t.label}</T>
+            </Pressable>
+            <Stepper small icon="minus" label={`Fewer ${t.label}`} onPress={() => set(t.id, n - 1)} disabled={n <= 0} />
+            <TextInput value={String(n)} onChangeText={(v) => set(t.id, Number(v.replace(/[^0-9]/g, '')))} keyboardType="number-pad" maxLength={3} selectTextOnFocus
+              accessibilityLabel={`${t.label} items`}
+              style={{ width: 44, height: 36, borderRadius: 10, borderWidth: 2, borderColor: on ? C.primary : C.line, textAlign: 'center', fontFamily: F.black, fontSize: 16, color: C.ink, padding: 0 }} />
+            <Stepper small icon="plus" label={`More ${t.label}`} onPress={() => set(t.id, n + 1)} disabled={total >= MIX_MAX} />
+          </View>
+        );
+      })}
+      {used.length >= 2 && total >= MIX_MIN && total <= MIX_MAX && (
+        <View style={{ backgroundColor: C.success50, borderRadius: 12, padding: 10 }}>
+          <T w={800} size={13} color={C.success700}>✓ {used.map((t) => `${t.label} ${value[t.id]}`).join(' + ')} = {total} items</T>
+        </View>
+      )}
+      {value.match ? <T w={600} size={12.5} color={C.muted}>Matching type: every pair is one item, in sets of up to 5.</T> : null}
+    </View>
   );
 }
 

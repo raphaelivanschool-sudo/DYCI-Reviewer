@@ -323,7 +323,9 @@ export function Empty({ icon, title, text, action }: { icon: IconName; title: st
  */
 export function Grid({ columns, gap = 10, children, style }: { columns: number; gap?: number; children: ReactNode; style?: StyleProp<ViewStyle> }) {
   const [width, setWidth] = useState(0);
-  const item = width ? (width - gap * (columns - 1)) / columns : 0;
+  // Floored: with fractional widths the row could add up to a hair more than the container,
+  // and Android then wrapped the last item onto its own row (only 2 per row instead of 3).
+  const item = width ? Math.floor(((width - gap * (columns - 1)) / columns) * 100) / 100 - 0.5 : 0;
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={[{ flexDirection: 'row', flexWrap: 'wrap', gap }, style]}>
       {width > 0 && Children.toArray(children).map((child, i) => <View key={i} style={{ width: item }}>{child}</View>)}

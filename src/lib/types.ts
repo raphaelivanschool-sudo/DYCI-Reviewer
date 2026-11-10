@@ -3,7 +3,8 @@ import type { Timestamp } from 'firebase/firestore';
 export type GradeLevel = 'Elementary' | 'High School' | 'Senior High' | 'College';
 
 export type OutfitSlot = 'head' | 'face' | 'neck';
-export type Outfit = { head: string; face: string; neck: string };
+/** skin: robot color unlocked by levelling up (see LEVEL_REWARDS). Missing = classic. */
+export type Outfit = { head: string; face: string; neck: string; skin?: string };
 export const DEFAULT_OUTFIT: Outfit = { head: 'none', face: 'none', neck: 'none' };
 
 /** users/{uid} */
@@ -76,19 +77,40 @@ export type Reviewer = {
   answered: number; // questions answered in the latest attempt (for the progress bar)
   partialCorrect?: number; // score so far of an unfinished attempt, so "Continue" can resume it
   partialByTopic?: Record<string, { correct: number; total: number }>;
+  partialByType?: Record<string, { correct: number; total: number }>;
+  /** Items per question type, e.g. { fill: 20, mcq: 15, id: 15 }. Missing on older reviewers (all multiple choice). */
+  types?: Partial<Record<QuestionType, number>>;
   bestPercent: number | null;
   lastPercent: number | null;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 };
 
-/** users/{uid}/reviewers/{id}/questions/{qid} */
+/**
+ * mcq multiple choice · fill fill in the blanks · tf true or false · id identification · match matching type
+ * enum enumeration · mtf modified true or false · seq sequencing.
+ */
+export type QuestionType = 'mcq' | 'fill' | 'tf' | 'id' | 'match' | 'enum' | 'mtf' | 'seq';
+
+/**
+ * users/{uid}/reviewers/{id}/questions/{qid}
+ * Which fields are used depends on `type` (missing = 'mcq', for reviewers made before types existed):
+ *  mcq, tf: choices + answerIndex (tf choices are ["True", "False"])
+ *  fill: prompt has "____" where the word goes; answers = accepted words
+ *  id: answers = accepted terms · enum: answers = every item to list
+ *  mtf: prompt marks the key word as **word**; answerIndex 0 = true, 1 = false; answers[0] = the right word when false
+ *  match: pairs (left ↔ right) · seq: items in the correct order
+ */
 export type Question = {
   id: string;
   order: number;
+  type?: QuestionType;
   prompt: string;
   choices: string[];
   answerIndex: number;
+  answers?: string[];
+  pairs?: { left: string; right: string }[];
+  items?: string[];
   explanation: string;
   topic: string;
 };
@@ -102,6 +124,8 @@ export type Attempt = {
   total: number;
   percent: number;
   byTopic: Record<string, { correct: number; total: number }>;
+  /** Score per question type (keys are QuestionType). */
+  byType?: Record<string, { correct: number; total: number }>;
   /** Prompts of the questions answered wrong (or timed out), for "most missed" stats. */
   missed?: string[];
   xpEarned?: number;

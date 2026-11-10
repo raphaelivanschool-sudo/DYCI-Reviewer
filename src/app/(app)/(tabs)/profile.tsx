@@ -11,7 +11,7 @@ import { Btn, Card, GroupLabel, HeaderChip, HeaderDecor, Screen, Scroll, T, Togg
 import { useAuth, useUid } from '@/lib/auth-context';
 import { confirmAction } from '@/lib/confirm';
 import { updateProfileFields, useClasses, useReviewers } from '@/lib/db';
-import { levelInfo, liveStreak } from '@/lib/game';
+import { levelInfo, liveStreak, nextReward } from '@/lib/game';
 import { scheduleDailyStudyReminder } from '@/lib/notifications';
 import { disableQuickLogin, getQuickLogin, quickLoginSupported } from '@/lib/quick-login';
 import { fmtTime } from '@/lib/schedule';
@@ -45,6 +45,7 @@ export default function Profile() {
   const avg = stats.attempts ? Math.round(stats.totalPercent / stats.attempts) : null;
   const fullName = [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ');
   const lvl = levelInfo(stats.xp);
+  const next = nextReward(stats.xp);
   const badges = profile.badges ?? [];
 
   const dailyTime = profile.dailyReminderTime ?? 19;
@@ -106,8 +107,9 @@ export default function Profile() {
         <GroupLabel>Planner & buddy</GroupLabel>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <Row icon="flame" title="My Journey" sub="Streak, goals and rewards" onPress={() => router.push('/journey')} />
+          <Row icon="gift" title="Level rewards" sub={next ? `Next: ${next.label} at Level ${next.level}` : 'All rewards unlocked!'} onPress={() => router.push('/rewards')} />
           <Row icon="calendar" title="My class schedule" sub={classes.length ? `${new Set(classes.map((c) => c.subject)).size} subjects · reminders ${profile.remindersOn ? 'on' : 'off'}` : 'Not set up yet'} onPress={() => router.navigate({ pathname: '/schedule', params: { tab: 'classes' } })} />
-          <Row icon="shirt" title="My METANOIA buddy" sub="Outfits and gestures" onPress={() => router.push('/buddy')} last />
+          <Row icon="shirt" title="My METANOIA buddy" sub="Skins, outfits and gestures" onPress={() => router.push('/buddy')} last />
         </Card>
 
         <GroupLabel>Study</GroupLabel>

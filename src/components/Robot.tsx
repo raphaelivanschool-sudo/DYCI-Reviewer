@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useImperativeHandle, type ReactNode, type Ref } from 'react';
+import { createContext, use, useEffect, useImperativeHandle, type ReactNode, type Ref } from 'react';
 import { StyleSheet, View, type ViewStyle } from 'react-native';
 import Animated, {
   cancelAnimation,
@@ -16,6 +16,8 @@ import Svg, { Circle, Ellipse, G, Path, Rect, Text as SvgText } from 'react-nati
 
 import type { Gesture } from '@/lib/ai';
 import type { Outfit } from '@/lib/types';
+
+import { SKIN_LAYERS, type RobotSkinId } from './robot-skins';
 
 /**
  * METANOIA the robot, from the 3D model in blender/METANOIA_Robot_3D_Character.blend.
@@ -180,6 +182,8 @@ type Props = {
   still?: boolean;
   style?: ViewStyle;
   mood?: Mood;
+  /** Color skin (level reward). Default: the outfit's skin, else classic. */
+  skin?: RobotSkinId;
   /** How much of the body to show. Default: picked from `size`. */
   frame?: RobotFrame;
   ref?: Ref<RobotHandle>;
@@ -188,7 +192,7 @@ type Props = {
 const ease = Easing.inOut(Easing.quad);
 const to = (v: number, ms: number) => withTiming(v, { duration: ms, easing: ease });
 
-export function Robot({ size, outfit, intro, idleGesture, idleEvery = 7000, still, style, mood = 'happy', frame, ref }: Props) {
+export function Robot({ size, outfit, skin, intro, idleGesture, idleEvery = 7000, still, style, mood = 'happy', frame, ref }: Props) {
   const reduceMotion = useReducedMotion();
   const o = outfit ?? { head: 'none', face: 'none', neck: 'none' };
   const f = FRAMES[frame ?? frameFor(size)];
@@ -323,6 +327,7 @@ export function Robot({ size, outfit, intro, idleGesture, idleEvery = 7000, stil
   const pivotY = Math.min(PIVOT.feet[1], f.top + 1 / f.zoom - 0.02);
 
   return (
+    <SkinContext value={skinOf(skin ?? o.skin)}>
     <View style={[{ width: size, height: size, overflow: 'hidden' }, style]} pointerEvents="none" accessible={false} aria-hidden importantForAccessibility="no-hide-descendants">
       <View style={{ position: 'absolute', width: stage, height: stage, left: (size - stage) / 2, top: -f.top * stage }}>
         {f.zoom === 1 && (
@@ -373,12 +378,20 @@ export function Robot({ size, outfit, intro, idleGesture, idleEvery = 7000, stil
         </Animated.View>
       </View>
     </View>
+    </SkinContext>
   );
 }
 
+/** The skin the parts of one robot are drawn with. */
+const SkinContext = createContext<RobotSkinId>('classic');
+/** Unknown or missing skins (e.g. from a newer app version) fall back to the classic look. */
+const skinOf = (s?: string): RobotSkinId => (s && s in SKIN_LAYERS ? (s as RobotSkinId) : 'classic');
+
 /** One rendered part, placed on the full-size render so joints line up. Children turn with it. */
 function Part({ name, style, children }: { name: keyof typeof PART; style?: object | object[]; children?: ReactNode }) {
-  const { src, rect } = PART[name];
+  const skin = use(SkinContext);
+  const { rect } = PART[name];
+  const src = skin === 'classic' ? PART[name].src : SKIN_LAYERS[skin][name as keyof (typeof SKIN_LAYERS)['mint']];
   const [x, y, w, h] = rect;
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]}>

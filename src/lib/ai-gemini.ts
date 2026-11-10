@@ -2,6 +2,8 @@ import { AIError, getAI, getGenerativeModel, GoogleAIBackend, Schema, ThinkingLe
 
 import { app } from './firebase';
 import type { Attachment, ChatContext, ChatOutput, ChatTurn, GenerateInput, GenerateOutput, Gesture, ScannedClass, ScannedExam } from './ai';
+import { matchSets, QUESTION_TYPES } from './question-types';
+import type { Question, QuestionType } from './types';
 import { SUBJECT_COLORS } from '@/theme';
 
 /**
@@ -71,38 +73,125 @@ const REVIEWER_SCHEMA = Schema.object({
           prompt: Schema.string(),
           choices: Schema.array({ items: Schema.string() }),
           answerIndex: Schema.integer(),
+          answers: Schema.array({ items: Schema.string() }),
+          pairs: Schema.array({ items: Schema.object({ properties: { left: Schema.string(), right: Schema.string() } }) }),
+          items: Schema.array({ items: Schema.string() }),
           explanation: Schema.string(),
           topic: Schema.string(),
         },
+        optionalProperties: ['choices', 'answerIndex', 'answers', 'pairs', 'items'],
       }),
     }),
   },
+  optionalProperties: ['summary'],
 });
 
-type RawQ = { prompt?: string; choices?: string[]; answerIndex?: number; explanation?: string; topic?: string };
+type RawQ = {
+  prompt?: string; choices?: string[]; answerIndex?: number; answers?: string[];
+  pairs?: { left?: string; right?: string }[]; items?: string[]; explanation?: string; topic?: string;
+};
 
+/** How to write each question type. `n` is the number of questions to ask for. */
+const HOW: Record<QuestionType, (n: number) => string> = {
+  mcq: (n) => `Write ${n} MULTIPLE CHOICE questions. Each has exactly 4 "choices" and one correct answer ("answerIndex" 0 to 3; vary it).`,
+  tf: (n) => `Write ${n} TRUE OR FALSE statements in "prompt". "choices" must be ["True", "False"]; "answerIndex" 0 if the statement is true, 1 if false. Make about half of them false by changing one fact.`,
+  fill: (n) => `Write ${n} FILL IN THE BLANKS items. "prompt" is a sentence from the lesson with one key word or short phrase replaced by "____" (exactly four underscores, once). "answers": the missing word first, then other accepted spellings or synonyms (1 to 3 in total).`,
+  id: (n) => `Write ${n} IDENTIFICATION items. "prompt" describes a term, person, place or thing from the lesson without naming it. "answers": the term first, then other accepted names (1 to 3 in total).`,
+  match: (n) => `Write ${n} MATCHING TYPE sets. "prompt" is a short instruction such as "Match each organelle with its job." "pairs": the {left, right} pairs of the set (use the exact number of pairs asked for each set). Every left and right must be different.`,
+  enum: (n) => `Write ${n} ENUMERATION items. "prompt" asks the student to list a number of things and says how many (2 to 6), e.g. "Give the 3 states of matter." "answers": every item, short (1 to 4 words each).`,
+  mtf: (n) => `Write ${n} MODIFIED TRUE OR FALSE statements. In "prompt" wrap exactly one key word in double asterisks, like "The heart has **three** chambers." "answerIndex" 0 if the statement is true, 1 if false. If false, "answers" is [the word that makes it true]; if true, "answers" is []. Make about half false by changing only the marked word.`,
+  seq: (n) => `Write ${n} SEQUENCING items. "prompt" says what to put in order (steps, events or stages). "items": 3 to 6 short steps in the CORRECT order.`,
+};
+
+/** Checks one AI question for its type and turns it into a saved question, or null if it is broken. */
+function toQuestion(type: QuestionType, q: RawQ): Omit<Question, 'id' | 'order'> | null {
+  const prompt = String(q.prompt ?? '').trim();
+  const words = (a?: unknown[]) => (Array.isArray(a) ? a.map((x) => String(x).trim()).filter(Boolean) : []);
+  const base = { type, prompt, explanation: String(q.explanation ?? ''), topic: String(q.topic || 'General'), choices: [] as string[], answerIndex: 0 };
+  if (!prompt) return null;
+  switch (type) {
+    case 'mcq': {
+      const choices = words(q.choices);
+      if (choices.length < 2 || typeof q.answerIndex !== 'number' || q.answerIndex < 0 || q.answerIndex >= choices.length) return null;
+      return { ...base, choices, answerIndex: q.answerIndex };
+    }
+    case 'tf':
+      return q.answerIndex === 0 || q.answerIndex === 1 ? { ...base, choices: ['True', 'False'], answerIndex: q.answerIndex } : null;
+    case 'mtf': {
+      if (!/\*\*.+?\*\*/.test(prompt) || (q.answerIndex !== 0 && q.answerIndex !== 1)) return null;
+      const answers = words(q.answers);
+      if (q.answerIndex === 1 && !answers.length) return null;
+      return { ...base, choices: ['True', 'False'], answerIndex: q.answerIndex, answers: q.answerIndex === 1 ? answers.slice(0, 3) : [] };
+    }
+    case 'fill':
+    case 'id': {
+      const answers = words(q.answers).slice(0, 4);
+      if (!answers.length || (type === 'fill' && !prompt.includes('__'))) return null;
+      return { ...base, prompt: type === 'fill' ? prompt.replace(/_{2,}/, '____') : prompt, answers };
+    }
+    case 'enum': {
+      const answers = words(q.answers).slice(0, 8);
+      return answers.length >= 2 ? { ...base, answers } : null;
+    }
+    case 'match': {
+      const pairs = (q.pairs ?? []).map((p) => ({ left: String(p.left ?? '').trim(), right: String(p.right ?? '').trim() })).filter((p) => p.left && p.right);
+      return pairs.length >= 2 ? { ...base, pairs } : null;
+    }
+    case 'seq': {
+      const items = words(q.items).slice(0, 8);
+      return items.length >= 3 ? { ...base, items } : null;
+    }
+  }
+}
+
+/**
+ * One Gemini request per question type (in parallel): a focused prompt per type is far more reliable
+ * than asking for a big mixed list. The parts come back in the picker's order, like the parts of an exam.
+ */
 export async function geminiGenerate(input: GenerateInput): Promise<GenerateOutput> {
   const system =
-    'You are METANOIA, a friendly study buddy for Filipino students. Write accurate multiple-choice reviewers ' +
+    'You are METANOIA, a friendly study buddy for Filipino students. Write accurate reviewer questions ' +
     'ONLY from the lesson the student gives you. Do not invent facts that are not in the lesson. Use simple English.';
-  const ask_ =
-    `Lesson title: ${input.title}\nDifficulty: ${input.difficulty}\nNumber of questions: ${input.count}\n\n` +
+  const lesson =
+    `Lesson title: ${input.title}\nDifficulty: ${input.difficulty}\n\n` +
     (input.text
       ? `Lesson notes:\n${input.text}\n\n`
       : (input.attachments?.length ?? 0) > 1
         ? `The lesson is in the ${input.attachments?.length} attached photos, in order. Use all of them.\n\n`
-        : 'The lesson is in the attached file.\n\n') +
-    'Give 3 to 5 short key points as "summary". Each question has exactly 4 choices and one correct answer ' +
-    '(answerIndex is 0 to 3; vary it). Group questions into 2 to 4 short topic names. Explanation: one sentence.';
-  const parts = [textPart(ask_), ...(input.attachments ?? []).map(filePart)];
-  const out = await ask<{ summary?: string[]; questions?: RawQ[] }>(system, REVIEWER_SCHEMA, parts);
+        : 'The lesson is in the attached file.\n\n');
+  const files = (input.attachments ?? []).map(filePart);
+  const parts = QUESTION_TYPES.map((t) => t.id).filter((t) => (input.types[t] ?? 0) > 0);
 
-  const questions = (out.questions ?? [])
-    .filter((q) => q.prompt && Array.isArray(q.choices) && q.choices.length >= 2 && typeof q.answerIndex === 'number' && q.answerIndex >= 0 && q.answerIndex < q.choices.length)
-    .slice(0, input.count)
-    .map((q, i) => ({ order: i, prompt: q.prompt!, choices: q.choices!.map(String), answerIndex: q.answerIndex!, explanation: q.explanation ?? '', topic: q.topic || 'General' }));
+  const results = await Promise.all(
+    parts.map(async (type, i) => {
+      const n = input.types[type] ?? 0;
+      const sets = type === 'match' ? matchSets(n) : [];
+      const prompt =
+        lesson +
+        HOW[type](type === 'match' ? sets.length : n) +
+        (type === 'match' ? ` Pairs per set, in order: ${sets.join(', ')}.` : '') +
+        ' Spread the questions over the whole lesson and do not repeat a question. Group them into 2 to 4 short topic names. Explanation: one sentence.' +
+        (i === 0 ? ' Also give 3 to 5 short key points of the lesson as "summary".' : ' Leave "summary" out.');
+      const out = await ask<{ summary?: string[]; questions?: RawQ[] }>(system, REVIEWER_SCHEMA, [textPart(prompt), ...files]);
+      let qs = (out.questions ?? []).map((q) => toQuestion(type, q)).filter((q): q is NonNullable<typeof q> => !!q);
+      if (type === 'match') {
+        // Trim pairs so the matching part has exactly the number of items asked for.
+        let left = n;
+        qs = qs
+          .map((q) => {
+            const pairs = (q.pairs ?? []).slice(0, Math.max(0, left));
+            left -= pairs.length;
+            return { ...q, pairs };
+          })
+          .filter((q) => (q.pairs?.length ?? 0) >= 2);
+      } else qs = qs.slice(0, n);
+      return { summary: out.summary ?? [], questions: qs };
+    }),
+  );
+
+  const questions = results.flatMap((r) => r.questions).map((q, order) => ({ ...q, order }));
   if (!questions.length) throw new Error('No questions were made. Try clearer or longer notes.');
-  return { summary: (out.summary ?? []).map(String).slice(0, 5), questions };
+  return { summary: results.flatMap((r) => r.summary).map(String).slice(0, 5), questions };
 }
 
 // ------------------------------------------------------------------ chat

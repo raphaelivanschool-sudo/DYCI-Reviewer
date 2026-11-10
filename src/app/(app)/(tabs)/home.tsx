@@ -63,10 +63,13 @@ export default function Home() {
           </View>
           <HeaderChip><Icon name="star" size={16} color="#FBBF24" /><T w={900} size={14} color="#fff">{profile.stats.xp ?? 0}</T></HeaderChip>
         </View>
-        <View style={[column, { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14 }]}>
+        {/* Tapping the level opens the rewards road (a prize for every level). */}
+        <Pressable accessibilityRole="button" accessibilityLabel="See level rewards" onPress={() => router.push('/rewards')}
+          style={[column, { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14 }]}>
           <LevelBadge xp={profile.stats.xp} />
           <XpBar xp={profile.stats.xp} />
-        </View>
+          <Icon name="gift" size={22} color="#FBBF24" />
+        </Pressable>
       </View>
 
       <Scroll style={{ paddingTop: 14 }} bottom={24}>

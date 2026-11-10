@@ -41,7 +41,7 @@ export default function SignUp() {
     setFormError(null);
     try {
       await signUp({ firstName, middleName, lastName, email, password, gradeLevel: grade });
-      // The app layout now shows "Check your email" until the 6-digit code is entered.
+      // The app layout now shows "Check your email" until the emailed link is tapped.
     } catch (err) {
       setFormError(authErrorMessage(err));
     } finally {

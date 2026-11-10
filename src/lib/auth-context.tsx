@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   reload,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -9,10 +10,9 @@ import {
   type User,
 } from '@firebase/auth';
 import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { auth, db, functions } from './firebase';
+import { auth, db } from './firebase';
 import { DEFAULT_OUTFIT, type GradeLevel, type UserProfile } from './types';
 
 type SignUpInput = {
@@ -44,12 +44,10 @@ type AuthState = {
   signUp: (input: SignUpInput) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logOut: () => Promise<void>;
-  /** Email verification: we email a 6-digit code (Cloud Functions sendEmailCode / verifyEmailCode). */
+  /** Email verification: Firebase emails a link (free, works on the Spark plan). */
   emailVerified: boolean;
-  /** Emails a new 6-digit code to the signed-in student. */
+  /** Emails a new verification link to the signed-in student. */
   sendVerification: () => Promise<void>;
-  /** Checks the code the student typed; resolves once the email is verified, throws a readable error otherwise. */
-  verifyCode: (code: string) => Promise<void>;
   /** Re-reads the account from Firebase; returns true once the email is verified. */
   checkVerified: () => Promise<boolean>;
   /** Quick login lock: false on a cold start when PIN/fingerprint is set up, until unlocked. */
@@ -136,11 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     emailVerified,
     sendVerification: async () => {
-      await httpsCallable(functions, 'sendEmailCode')();
-    },
-    verifyCode: async (code) => {
-      await httpsCallable<{ code: string }, { verified: boolean }>(functions, 'verifyEmailCode')({ code });
-      if (!(await value.checkVerified())) throw new Error('Could not confirm the email. Please try again.');
+      if (auth.currentUser) await sendEmailVerification(auth.currentUser);
     },
     checkVerified: async () => {
       if (!auth.currentUser) return false;
@@ -163,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const fullName = [firstName, middleName, lastName].map((s) => s.trim()).filter(Boolean).join(' ');
         await updateAuthProfile(cred.user, { displayName: fullName });
         await setDoc(doc(db, 'users', cred.user.uid), { ...newProfile({ firstName, middleName, lastName, gradeLevel }, email.trim()), createdAt: serverTimestamp() });
-        // We email a 6-digit code; the app waits on the "Check your email" screen.
-        await httpsCallable(functions, 'sendEmailCode')().catch((e) => console.warn('Could not send the verification code; the student can tap Send a new code.', e?.code));
+        // Firebase emails a verification link; the app waits on the "Check your email" screen.
+        await sendEmailVerification(cred.user).catch((e) => console.warn('Could not send the verification link; the student can tap Resend link.', e?.code));
       } catch (e) {
         // The account may exist without a profile now; the app will offer "Finish your profile".
         if (auth.currentUser) setProfileStatus((st) => (st === 'loading' ? 'missing' : st));
@@ -211,14 +205,4 @@ export function authErrorMessage(e: unknown) {
     'auth/too-many-requests': 'Too many tries. Wait a minute and try again.',
   };
   return map[code] ?? 'Something went wrong. Please try again.';
-}
-
-/** Message for a failed Cloud Function call. The functions throw short messages meant for students. */
-export function functionErrorMessage(e: unknown) {
-  const code = (e as { code?: string })?.code ?? '';
-  const msg = (e as { message?: string })?.message ?? '';
-  if (code === 'functions/unavailable' || code === 'functions/deadline-exceeded' && !msg) return 'No internet connection. Check it and try again.';
-  if (code === 'functions/not-found') return 'The email service is not set up yet. Ask the app owner to deploy the functions.';
-  if (code === 'functions/internal' || code === 'functions/unknown') return msg && msg !== 'internal' ? msg : 'Something went wrong. Please try again.';
-  return msg || 'Something went wrong. Please try again.';
 }

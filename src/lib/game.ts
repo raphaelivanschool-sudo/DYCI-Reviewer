@@ -1,3 +1,5 @@
+import type { RobotSkinId } from '@/components/robot-skins';
+
 import type { Attempt, DailyProgress, UserProfile } from './types';
 
 /**
@@ -96,6 +98,43 @@ export function journeyGoals(p: UserProfile, attempts: Attempt[]): Goal[] {
 /** Milestones shown on the streak road. */
 export const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
 
+// ------------------------------------------------------------------ level rewards
+/** Robot color skins. The pictures are made by scripts/make-robot-skins.mjs. */
+export const SKINS: { id: RobotSkinId; label: string }[] = [
+  { id: 'classic', label: 'Classic' },
+  { id: 'mint', label: 'Mint' },
+  { id: 'ocean', label: 'Ocean' },
+  { id: 'grape', label: 'Grape' },
+  { id: 'sunset', label: 'Sunset' },
+  { id: 'lime', label: 'Lime' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'sky', label: 'Sky' },
+  { id: 'coral', label: 'Coral' },
+  { id: 'midnight', label: 'Midnight' },
+  { id: 'gold', label: 'Gold' },
+  { id: 'galaxy', label: 'Galaxy' },
+];
+
+export type LevelReward =
+  | { level: number; kind: 'skin'; id: RobotSkinId; label: string }
+  | { level: number; kind: 'avatar'; id: string; label: string };
+
+/** Every level from 2 up gives one prize: a robot skin, or a profile picture character. */
+export const LEVEL_REWARDS: LevelReward[] = [
+  ...SKINS.slice(1, 9).map((s, i) => ({ level: i + 2, kind: 'skin' as const, id: s.id, label: `${s.label} skin` })), // LV 2–9
+  { level: 10, kind: 'avatar', id: 'king', label: 'King' },
+  { level: 11, kind: 'skin', id: 'midnight', label: 'Midnight skin' },
+  { level: 12, kind: 'skin', id: 'gold', label: 'Gold skin' },
+  { level: 13, kind: 'skin', id: 'galaxy', label: 'Galaxy skin' },
+  { level: 14, kind: 'avatar', id: 'star', label: 'Star' },
+];
+
+/** Level that unlocks a skin (classic = 1). */
+export const skinLevel = (id: string) => LEVEL_REWARDS.find((r) => r.kind === 'skin' && r.id === id)?.level ?? 1;
+
+/** The next prize the student has not reached yet, or null when every reward is unlocked. */
+export const nextReward = (xp = 0) => LEVEL_REWARDS.find((r) => r.level > levelInfo(xp).level) ?? null;
+
 // ------------------------------------------------------------------ characters (profile picture)
 export type Character = { id: string; label: string; bg: string; fg: string; level: number };
 export const CHARACTERS: Character[] = [
@@ -106,5 +145,5 @@ export const CHARACTERS: Character[] = [
   { id: 'mochi', label: 'Mochi', bg: '#FFE4E6', fg: '#DB2777', level: 1 },
   { id: 'bolt', label: 'Bolt', bg: '#DBEAFE', fg: '#2563EB', level: 1 },
   { id: 'king', label: 'King', bg: '#FEF9C3', fg: '#CA8A04', level: 10 },
-  { id: 'star', label: 'Star', bg: '#E0E7FF', fg: '#4F46E5', level: 15 },
+  { id: 'star', label: 'Star', bg: '#E0E7FF', fg: '#4F46E5', level: 14 }, // keep in step with LEVEL_REWARDS
 ];

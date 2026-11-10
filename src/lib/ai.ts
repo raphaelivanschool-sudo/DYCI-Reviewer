@@ -2,7 +2,8 @@ import { httpsCallable } from 'firebase/functions';
 
 import { geminiChat, geminiGenerate, geminiScan, geminiScanExam } from './ai-gemini';
 import { functions } from './firebase';
-import { SAMPLE_QUESTIONS, SAMPLE_WEEK } from './sample-data';
+import { matchSets, QUESTION_TYPES, type TypeCounts } from './question-types';
+import { SAMPLE_WEEK } from './sample-data';
 import type { ClassItem, Difficulty, Question, SourceType } from './types';
 
 /**
@@ -51,7 +52,10 @@ export type GenerateInput = {
   text?: string;
   storagePath?: string | null; // functions mode: uploaded file in Cloud Storage
   attachments?: Attachment[]; // gemini mode: the file, or several photos of notes
+  /** Total items (sum of `types`). */
   count: number;
+  /** Items per question type, e.g. { fill: 20, mcq: 15, id: 15 }. A matching pair counts as one item. */
+  types: TypeCounts;
   difficulty: Difficulty;
 };
 export type GenerateOutput = { summary: string[]; questions: Omit<Question, 'id'>[] };
@@ -124,10 +128,21 @@ const shuffle = <T,>(arr: T[]) => {
 
 const DEFINITION = /^(.{3,60}?)\s+(is|are|refers to|means|was|were)\s+(.{8,})$/i;
 
-/** Turns "X is Y." sentences from pasted notes into multiple-choice questions. */
-function mockGenerate(input: GenerateInput): GenerateOutput {
-  const text = (input.text ?? '').trim();
-  const facts: { term: string; def: string; topic: string }[] = [];
+type Fact = { term: string; def: string; topic: string };
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Used when the notes have too few "X is Y." sentences (or the mock got a file it can't read). */
+const SAMPLE_NOTES = `Sports safety
+A warm-up is light exercise that prepares the muscles before playing. A helmet is gear that protects the head from injury. Water is the best drink during exercise. A cool-down is 5 to 10 minutes of easy movement after exercise.
+
+Team sports
+A referee is the official who enforces the rules of the game. Fair play is following the rules and respecting others. Volleyball is a team sport with 6 players on each side of the court.
+
+Fitness
+Jogging is an aerobic exercise that trains the heart and lungs. Flexibility is the ability of the joints to move through their full range. Sleep is the time the body uses to repair muscles and restore energy.`;
+
+function readFacts(text: string): Fact[] {
+  const facts: Fact[] = [];
   text.split(/\n\s*\n/).forEach((para, pi) => {
     const lines = para.trim().split('\n');
     // A short first line without a period is a heading: use it as the topic, not as a sentence.
@@ -141,32 +156,62 @@ function mockGenerate(input: GenerateInput): GenerateOutput {
         if (m) facts.push({ term: m[1].replace(/^(the|a|an)\s+/i, ''), def: m[3], topic: heading });
       });
   });
+  return facts;
+}
 
-  if (facts.length < 4) {
-    // Not enough definitions (or a file/photo the mock cannot read): use the sample bank.
-    const qs = shuffle(SAMPLE_QUESTIONS).slice(0, input.count).map((q, i) => ({ ...q, order: i }));
-    return {
-      summary: ['Sports safety means warming up, using the right gear, and knowing the rules.', 'Team sports depend on clear roles and fair play.', 'Rest and water help your body recover after activity.'],
-      questions: qs,
-    };
-  }
-
+/**
+ * Practice mode: turns "X is Y." sentences from pasted notes into every question type.
+ * Simple on purpose; Gemini mode writes real questions.
+ */
+function mockGenerate(input: GenerateInput): GenerateOutput {
+  let facts = readFacts((input.text ?? '').trim());
+  if (facts.length < 4) facts = readFacts(SAMPLE_NOTES);
   const defs = facts.map((f) => f.def);
-  const questions = shuffle(facts)
-    .slice(0, input.count)
-    .map((f, i) => {
-      const wrong = shuffle(defs.filter((d) => d !== f.def)).slice(0, 3);
-      const choices = shuffle([f.def, ...wrong]);
-      return {
-        order: i,
-        prompt: `Which of these best describes ${f.term}?`,
-        choices,
-        answerIndex: choices.indexOf(f.def),
-        explanation: `${f.term[0].toUpperCase()}${f.term.slice(1)} ${f.def}.`,
-        topic: f.topic,
-      };
-    });
-  return { summary: facts.slice(0, 3).map((f) => `${f.term}: ${f.def}.`), questions };
+  let k = 0;
+  const nextFact = () => facts[k++ % facts.length];
+  const other = (f: Fact) => shuffle(facts.filter((x) => x !== f))[0];
+
+  const out: Omit<Question, 'id'>[] = [];
+  const add = (q: Omit<Question, 'id' | 'order'>) => out.push({ ...q, order: out.length });
+  facts = shuffle(facts);
+  for (const { id: type } of QUESTION_TYPES) {
+    const n = input.types[type] ?? 0;
+    if (!n) continue;
+    if (type === 'match') {
+      for (const size of matchSets(n)) {
+        const set = Array.from({ length: Math.min(size, facts.length) }, nextFact);
+        add({ type, prompt: 'Match each term with what it means.', choices: [], answerIndex: 0, pairs: set.map((f) => ({ left: cap(f.term), right: f.def })), explanation: '', topic: set[0].topic });
+      }
+      continue;
+    }
+    for (let i = 0; i < n; i++) {
+      const f = nextFact();
+      const explanation = `${cap(f.term)} is ${f.def}.`;
+      const base = { type, explanation, topic: f.topic };
+      const truth = i % 2 === 0;
+      if (type === 'mcq') {
+        const choices = shuffle([f.def, ...shuffle(defs.filter((d) => d !== f.def)).slice(0, 3)]);
+        add({ ...base, prompt: `Which of these best describes ${f.term}?`, choices, answerIndex: choices.indexOf(f.def) });
+      } else if (type === 'tf') {
+        add({ ...base, prompt: `${cap(f.term)} is ${truth ? f.def : other(f).def}.`, choices: ['True', 'False'], answerIndex: truth ? 0 : 1 });
+      } else if (type === 'fill') {
+        add({ ...base, prompt: `____ is ${f.def}.`, choices: [], answerIndex: 0, answers: [f.term] });
+      } else if (type === 'id') {
+        add({ ...base, prompt: `${cap(f.def)}.`, choices: [], answerIndex: 0, answers: [f.term] });
+      } else if (type === 'mtf') {
+        add({ ...base, prompt: `**${cap(truth ? f.term : other(f).term)}** is ${f.def}.`, choices: ['True', 'False'], answerIndex: truth ? 0 : 1, answers: truth ? [] : [f.term] });
+      } else if (type === 'enum') {
+        const same = facts.filter((x) => x.topic === f.topic).slice(0, 5);
+        const list = same.length >= 2 ? same : facts.slice(0, 3);
+        add({ ...base, prompt: `Give the ${list.length} terms discussed under "${list[0].topic}".`, choices: [], answerIndex: 0, answers: list.map((x) => x.term), explanation: list.map((x) => cap(x.term)).join(', ') });
+      } else if (type === 'seq') {
+        const start = Math.floor(Math.random() * Math.max(1, facts.length - 3));
+        const steps = readFacts(input.text?.trim() || SAMPLE_NOTES).slice(start, start + 4);
+        add({ ...base, prompt: 'Arrange these terms in the order the lesson discusses them.', choices: [], answerIndex: 0, items: steps.map((x) => cap(x.term)), explanation: 'This is the order they appear in your notes.' });
+      }
+    }
+  }
+  return { summary: facts.slice(0, 3).map((f) => `${cap(f.term)}: ${f.def}.`), questions: out };
 }
 
 function mockChat(message: string, ctx: ChatContext): ChatOutput {

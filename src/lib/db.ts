@@ -124,8 +124,12 @@ export type NewReviewer = Omit<Reviewer, 'id' | 'createdAt' | 'updatedAt' | 'ans
 export async function saveReviewer(uid: string, data: NewReviewer, questions: Omit<Question, 'id'>[]) {
   const ref = doc(col(uid, 'reviewers'));
   const batch = writeBatch(db);
+  // Items per type, so the results screen can show the score for each part of a Mix.
+  const types: Record<string, number> = {};
+  questions.forEach((q) => (types[q.type ?? 'mcq'] = (types[q.type ?? 'mcq'] ?? 0) + 1));
   batch.set(ref, {
     ...data,
+    types,
     questionCount: questions.length,
     answered: 0,
     bestPercent: null,
@@ -133,7 +137,8 @@ export async function saveReviewer(uid: string, data: NewReviewer, questions: Om
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  questions.forEach((q) => batch.set(doc(collection(ref, 'questions')), q));
+  // Firestore rejects undefined values, so leave out the fields a question type doesn't use.
+  questions.forEach((q) => batch.set(doc(collection(ref, 'questions')), Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined))));
   await batch.commit();
   return ref.id;
 }
@@ -159,8 +164,8 @@ export const moveReviewer = (uid: string, reviewerId: string, folderId: string |
   updateDoc(doc(col(uid, 'reviewers'), reviewerId), { folderId, updatedAt: serverTimestamp() });
 
 /** Records progress mid-quiz so Home can show "12 of 20". */
-export const saveProgress = (uid: string, reviewerId: string, answered: number, partialCorrect: number, partialByTopic: Attempt['byTopic']) =>
-  updateDoc(doc(col(uid, 'reviewers'), reviewerId), { answered, partialCorrect, partialByTopic, updatedAt: serverTimestamp() });
+export const saveProgress = (uid: string, reviewerId: string, answered: number, partialCorrect: number, partialByTopic: Attempt['byTopic'], partialByType: Attempt['byTopic'] = {}) =>
+  updateDoc(doc(col(uid, 'reviewers'), reviewerId), { answered, partialCorrect, partialByTopic, partialByType, updatedAt: serverTimestamp() });
 
 // ------------------------------------------------------------------ attempts + stats
 export { localDay };
@@ -169,6 +174,7 @@ export type AttemptResult = {
   correct: number;
   total: number;
   byTopic: Attempt['byTopic'];
+  byType?: Attempt['byTopic'];
   missed: string[];
   xpEarned: number;
   bestCombo: number;
@@ -202,13 +208,15 @@ export async function saveAttempt(uid: string, reviewer: Reviewer, r: AttemptRes
 
     tx.set(attemptRef, {
       reviewerId: reviewer.id, reviewerTitle: reviewer.title, correct: r.correct, total: r.total, percent,
-      byTopic: r.byTopic, missed: r.missed.slice(0, 50), xpEarned: r.xpEarned, bestCombo: r.bestCombo, stars,
+      byTopic: r.byTopic, byType: r.byType ?? {}, missed: r.missed.slice(0, 50), xpEarned: r.xpEarned, bestCombo: r.bestCombo, stars,
       createdAt: serverTimestamp(),
     });
     tx.update(reviewerRef, {
-      answered: r.total,
+      // Questions, not points: a matching set is one question worth several points.
+      answered: reviewer.questionCount,
       partialCorrect: 0,
       partialByTopic: {},
+      partialByType: {},
       lastPercent: percent,
       bestPercent: Math.max(percent, reviewer.bestPercent ?? 0),
       updatedAt: serverTimestamp(),
