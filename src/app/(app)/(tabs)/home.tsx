@@ -3,14 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
-import { AvatarView, LevelBadge, XpBar, XpPill } from '@/components/game';
+import { AvatarView, FlameCount, LevelRing, StarCount, XpPill } from '@/components/game';
 import { Icon, type IconName } from '@/components/Icon';
 import { Robot, type RobotHandle } from '@/components/Robot';
-import { Btn, Card, HeaderChip, HeaderDecor, LinkText, Screen, Scroll, T, Tile } from '@/components/ui';
+import { Btn, Card, HeaderDecor, LinkText, Screen, Scroll, T, Tile } from '@/components/ui';
 import { useAuth, useUid } from '@/lib/auth-context';
 import { buddyLines } from '@/lib/buddy';
 import { claimDaily, useAttempts, useClasses, useExams, useFolders, useReviewers } from '@/lib/db';
-import { CHEST_XP, dailyQuests, liveStreak, todayProgress } from '@/lib/game';
+import { CHEST_XP, dailyQuests, levelInfo, liveStreak, nextReward, todayProgress } from '@/lib/game';
 import { useLang } from '@/lib/lang';
 import { column, useResponsive } from '@/lib/responsive';
 import { upcomingItems } from '@/lib/schedule';
@@ -34,7 +34,13 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const folders = useFolders(uid).data;
   const reviewers = useReviewers(uid).data;
+  const { compact } = useResponsive();
   if (!profile) return null;
+
+  const xp = profile.stats.xp ?? 0;
+  const lvl = levelInfo(xp);
+  const streak = liveStreak(profile);
+  const reward = nextReward(xp);
 
   const inProgress = reviewers.find((r) => r.answered > 0 && r.answered < r.questionCount) ?? reviewers[0];
   const playOrCreate = () =>
@@ -262,11 +268,11 @@ function BuddyCard() {
   }, [i, line?.text]);
 
   if (!profile || !line) return null;
-  const streak = liveStreak(profile);
   // Fixed sizes: the card, the robot and the bubble never change size when METANOIA's line changes,
   // so nothing below the card jumps. Long lines get a smaller font instead of a taller bubble.
+  // (The streak now lives in the header, next to the XP star.)
   const robotSize = compact ? 104 : 128;
-  const cardHeight = compact ? 196 : 214;
+  const cardHeight = compact ? 170 : 184;
   const textSize = line.text.length > 90 ? 12.5 : line.text.length > 60 ? 13.5 : 14.5;
   return (
     <View style={{ height: cardHeight, backgroundColor: '#fff', borderRadius: 26, marginBottom: 12, overflow: 'hidden', borderBottomWidth: 4, borderBottomColor: C.line }}>
@@ -278,7 +284,7 @@ function BuddyCard() {
         <View style={{ position: 'absolute', left: 12, bottom: 10, backgroundColor: C.success50, borderRadius: 99, paddingHorizontal: 9, height: 22, justifyContent: 'center' }}>
           <T w={900} size={11} color={C.success700} numberOfLines={1}>Mood: {line.mood}</T>
         </View>
-        <View style={{ position: 'absolute', left: robotSize + 10, right: 12, top: 54, bottom: 12 }}>
+        <View style={{ position: 'absolute', left: robotSize + 10, right: 12, top: 16, bottom: 12 }}>
           {/* The old and new bubbles fade on top of each other inside a fixed box. */}
           <View style={{ flex: 1 }}>
             <Animated.View key={line.text} entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)}
@@ -291,12 +297,6 @@ function BuddyCard() {
             <T w={900} size={13} color={C.primary700} numberOfLines={1} style={{ flexShrink: 1 }}>{lang === 'tl' ? 'I-tap para mag-chat' : 'Tap me to chat'}</T>
           </View>
         </View>
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${streak}-day streak. Open My Journey`} onPress={() => router.push('/journey')}
-        style={{ position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF7ED', borderWidth: 2, borderColor: '#FED7AA', borderBottomWidth: 4, borderRadius: 99, paddingHorizontal: 10, height: 34 }}>
-        <Icon name="flame" size={17} color="#EA580C" />
-        <T w={900} color="#C2410C">{streak} {streak === 1 ? 'day' : 'days'}</T>
-        <Icon name="right" size={14} color="#C2410C" />
       </Pressable>
     </View>
   );
