@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Each student can only read and write their own data under /users/{uid}.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function validName(v) {
+      return v is string && v.size() > 0 && v.size() <= 60;
+    }
+
+    function validProfile(d) {
+      return validName(d.firstName)
+        && validName(d.lastName)
+        && (d.middleName == null || (d.middleName is string && d.middleName.size() <= 60))
+        && d.email == request.auth.token.email
+        && d.gradeLevel in ['Elementary', 'High School', 'Senior High', 'College']
+        && (!('language' in d) || d.language in ['en', 'tl']);
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create: if isOwner(uid) && validProfile(request.resource.data);
+      // Names can be edited, but the email must stay the one used to sign in.
+      allow update: if isOwner(uid) && validProfile(request.resource.data);
+
+      // folders, reviewers (+ questions), attempts, classes, messages.
+      // {subcollection} makes this match at least one level below the user document; a bare
+      // {document=**} would also match /users/{uid} itself and skip validProfile above.
+      match /{subcollection}/{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

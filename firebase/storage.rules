@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Uploaded lessons and schedule photos: private to the student, max 20 MB,
+// PDF / Word / PowerPoint / text / images only.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{uid}/uploads/{fileName} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size < 20 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'text/plain'
+          || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*'));
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
