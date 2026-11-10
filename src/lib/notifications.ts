@@ -1,14 +1,18 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { optionalNative } from './optional-native';
 import { DAY_SHORT, fmtTime, parseDateKey } from './schedule';
 import type { ClassItem, ExamItem } from './types';
 
 // Class reminders and the daily study reminder are LOCAL notifications: the phone schedules them
 // itself, so they work offline and need no server or Firebase Cloud Messaging.
 
-Notifications.setNotificationHandler({
+// Loaded lazily: when the running app lacks the native module, reminders are skipped instead of crashing.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Notifications = optionalNative('expo-notifications', () => require('expo-notifications') as typeof import('expo-notifications'));
+
+Notifications?.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
     shouldShowList: true,
@@ -28,11 +32,10 @@ const IN_EXPO_GO = Constants.executionEnvironment === ExecutionEnvironment.Store
 let channelReady = false;
 
 async function ensureChannel() {
-  if (Platform.OS !== 'android' || IN_EXPO_GO || channelReady) return;
+  if (Platform.OS !== 'android' || IN_EXPO_GO || channelReady || !Notifications) return;
   try {
     await Notifications.setNotificationChannelAsync(CHANNEL, {
       name: 'Class and study reminders',
-      // eslint-disable-next-line import/namespace -- exported at runtime; the rule misreads the compiled enum
       importance: Notifications.AndroidImportance.HIGH,
     });
     channelReady = true;
@@ -45,6 +48,7 @@ async function ensureChannel() {
 const channel = () => (channelReady ? { channelId: CHANNEL } : {});
 
 export async function ensurePermission() {
+  if (!Notifications) return false;
   try {
     await ensureChannel();
     const current = await Notifications.getPermissionsAsync();
@@ -57,6 +61,7 @@ export async function ensurePermission() {
 }
 
 async function cancelKind(kind: 'class' | 'daily' | 'exam') {
+  if (!Notifications) return;
   const all = await Notifications.getAllScheduledNotificationsAsync();
   await Promise.all(
     all.filter((n) => n.content.data?.kind === kind).map((n) => Notifications.cancelScheduledNotificationAsync(n.identifier)),
@@ -65,7 +70,7 @@ async function cancelKind(kind: 'class' | 'daily' | 'exam') {
 
 /** Re-creates one weekly reminder per class, `leadMin` minutes before it starts. */
 export async function scheduleClassReminders(classes: ClassItem[], on: boolean, leadMin: number) {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || !Notifications) return;
   await cancelKind('class');
   if (!on || !classes.length || !(await ensurePermission())) return;
   for (const c of classes) {
@@ -94,7 +99,7 @@ export async function scheduleClassReminders(classes: ClassItem[], on: boolean, 
 
 /** time: hours of the day (19.5 = 7:30 PM). */
 export async function scheduleDailyStudyReminder(on: boolean, time = 19) {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || !Notifications) return;
   await cancelKind('daily');
   if (!on || !(await ensurePermission())) return;
   const hour = Math.floor(time);
@@ -125,7 +130,7 @@ const examLine = (days: number, name: string) =>
 
 /** One-time reminders per upcoming exam: N days before at the chosen time, plus 1 hour before it starts. */
 export async function scheduleExamReminders(exams: ExamItem[], on: boolean, plan: ExamReminderPlan = EXAM_REMINDER_DEFAULTS) {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || !Notifications) return;
   await cancelKind('exam');
   const now = Date.now();
   const future = exams.filter((e) => parseDateKey(e.date).getTime() + e.start * 3_600_000 > now);
